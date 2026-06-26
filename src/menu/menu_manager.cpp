@@ -99,7 +99,7 @@ static constexpr float kHtmlKeepAlive = 2.0f;
 // it renders to nothing and then expires.
 static constexpr int kHtmlClearDurationSecs = 1;
 static const char *kHtmlClearContent = "<font></font>";
-static const char *kHtmlMarker = "\xE2\x96\xB6 "; // ▶
+static const char *kHtmlMarker = ""; // cyber: курсор обозначается только цветом строки (минимализм, без ▶)
 
 // Cap on nested menu callbacks, so a consumer that re-displays a menu inside its
 // own onSelect/onEnd can't recurse the server into a stack overflow.
