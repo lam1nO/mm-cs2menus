@@ -95,6 +95,10 @@ static void ConfigHandler(const std::string &section, const std::string &key, co
 		{
 			cfg->menu.navExit = ToLower(value);
 		}
+		else if (k == "navexitspec")
+		{
+			cfg->menu.navExitSpec = ToLower(value);
+		}
 	}
 }
 

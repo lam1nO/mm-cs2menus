@@ -56,6 +56,31 @@ CGameEntitySystem *GameEntitySystem()
 	return *reinterpret_cast<CGameEntitySystem **>(reinterpret_cast<uintptr_t>(g_pGameResourceServiceServer) + gamedata::kGameEntitySystemOffset);
 }
 
+// Command-константы CS (совпадают с CS_TEAM_* / ObserverMode_t основного дерева cs2kz).
+static constexpr int kTeamSpectator = 1; // CS_TEAM_SPECTATOR
+static constexpr uint32_t kObsModeNone = 0; // OBS_MODE_NONE
+
+// True если игрок в `slot` сейчас наблюдает. Два случая, в обоих F занят осмотром
+// оружия наблюдаемого игрока (перебивает закрытие меню), поэтому выход — на Shift:
+//   1) команда SPECTATOR (KZ !spec);
+//   2) мёртвый на играющей команде смотрит за другим (активный observer-режим).
+// Читается заново на каждом поллинге/рендере (main thread), поэтому смена команды при
+// открытом меню переключает клавишу выхода на следующем кадре.
+static bool SlotIsSpectator(int slot)
+{
+	CCSPlayerController *controller = CCSPlayerController::FromSlot(slot);
+	if (!controller)
+	{
+		return false;
+	}
+	if (controller->GetTeam() == kTeamSpectator)
+	{
+		return true;
+	}
+	CBasePlayerPawn *pawn = controller->GetInputPawn();
+	return pawn && pawn->GetObserverMode() != kObsModeNone;
+}
+
 // Cached gamerules for the HUD-flashing workaround. Re-found each map.
 static CCSGameRules *s_pGameRules = nullptr;
 
@@ -526,6 +551,8 @@ static void LoadAndApplyConfig()
 	applyNav(g_MenusConfig.menu.navSelect, settings.keySelect, settings.keySelectLabel);
 	applyNav(g_MenusConfig.menu.navBack, settings.keyBack, settings.keyBackLabel);
 	applyNav(g_MenusConfig.menu.navExit, settings.keyExit, settings.keyExitLabel);
+	// Выход для спектатора (в спеках F занят осмотром оружия) — отдельный keyExitSpec.
+	applyNav(g_MenusConfig.menu.navExitSpec, settings.keyExitSpec, settings.keyExitSpecLabel);
 
 	g_MenuManager.Configure(settings);
 
@@ -535,6 +562,8 @@ static void LoadAndApplyConfig()
 	g_Translations.Load(g_SMAPI->GetBaseDir());
 	g_Translations.SetDefaultLanguage(g_MenusConfig.menu.defaultLanguage);
 	g_MenuManager.SetLanguageResolver([](int slot) { return SlotLanguage(slot); });
+	// Спектатор-контекст для выбора клавиши выхода (F живому / Shift спектатору).
+	g_MenuManager.SetSpectatorResolver([](int slot) { return SlotIsSpectator(slot); });
 }
 
 // Server console / rcon command to reapply core.cfg without waiting for a map change.

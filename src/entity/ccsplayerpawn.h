@@ -36,6 +36,30 @@ public:
 		uintptr_t buttonState = reinterpret_cast<uintptr_t>(services) + offButtons;
 		return *reinterpret_cast<uint64_t *>(buttonState + offStates);
 	}
+
+	// Текущий режим наблюдения (m_pObserverServices->m_iObserverMode).
+	// OBS_MODE_NONE (0) если игрок не наблюдает или схема недоступна.
+	// Тот же безопасный паттерн с проверкой оффсетов, что и в GetHeldButtons.
+	uint32_t GetObserverMode()
+	{
+		static int16_t offServices =
+			schema::GetOffset("CBasePlayerPawn", FNV1a("CBasePlayerPawn"), "m_pObserverServices", FNV1a("m_pObserverServices"));
+		static int16_t offMode =
+			schema::GetOffset("CPlayer_ObserverServices", FNV1a("CPlayer_ObserverServices"), "m_iObserverMode", FNV1a("m_iObserverMode"));
+
+		if (offServices <= 0 || offMode <= 0)
+		{
+			return 0; // OBS_MODE_NONE
+		}
+
+		void *services = *reinterpret_cast<void **>(reinterpret_cast<uintptr_t>(this) + offServices);
+		if (!services)
+		{
+			return 0;
+		}
+
+		return *reinterpret_cast<uint32_t *>(reinterpret_cast<uintptr_t>(services) + offMode);
+	}
 };
 
 // CCSPlayerPawn : CBasePlayerPawn

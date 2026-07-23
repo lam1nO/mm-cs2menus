@@ -37,13 +37,17 @@ struct MenuManagerSettings
 	uint64_t keyDown = 0x10;         // S (IN_BACK)
 	uint64_t keySelect = 0x400;      // D (IN_MOVERIGHT)
 	uint64_t keyBack = 0x2000;       // R (IN_RELOAD) — вверх к родителю (решение 23.07)
-	uint64_t keyExit = 0x800000000;  // F (IN_LOOKATWEAPON) — закрыть меню
+	uint64_t keyExit = 0x800000000;  // F (IN_LOOKATWEAPON) — закрыть меню (живой игрок)
+	// Выход для СПЕКТАТОРА: SHIFT (IN_SPEED). В спеках F занят осмотром оружия
+	// наблюдаемого игрока, поэтому спектатору выход — Shift (подставляется по слоту).
+	uint64_t keyExitSpec = 0x10000;  // SHIFT (IN_SPEED)
 	// HTML: display labels for the footer key hints (uppercased key names).
 	std::string keyUpLabel = "W";
 	std::string keyDownLabel = "S";
 	std::string keySelectLabel = "D";
 	std::string keyBackLabel = "R";
 	std::string keyExitLabel = "F";
+	std::string keyExitSpecLabel = "SHIFT";
 	// HTML: hex colors for markup.
 	std::string navColor = "#ff2ee7";
 	std::string footerColor = "#909090";
@@ -157,6 +161,12 @@ public:
 	// When unset (or it returns ""), the translation default language is used.
 	void SetLanguageResolver(std::function<std::string(int slot)> resolver);
 
+	// Resolve whether a viewing player is currently spectating (team spectator or
+	// active observer mode). Set by the plugin. When unset, players are treated as
+	// live, so the Exit key stays keyExit (F). Queried per-slot each poll/render so a
+	// mid-menu team switch flips the Exit key on the next frame (see keyExitSpec).
+	void SetSpectatorResolver(std::function<bool(int slot)> resolver);
+
 private:
 	struct MenuItem
 	{
@@ -253,6 +263,15 @@ private:
 	uint64_t EffectiveNavMask(const MenuDef &def, MenuNavAction action) const;
 	std::string EffectiveNavLabel(const MenuDef &def, MenuNavAction action) const;
 
+	// Exit binding with the player's context folded in: a per-menu Exit override
+	// wins for everyone; otherwise a spectator gets keyExitSpec (Shift) and a live
+	// player keyExit (F). Slot-aware because "is spectating" is per-player + dynamic.
+	uint64_t EffectiveExitMask(const MenuDef &def, int slot) const;
+	std::string EffectiveExitLabel(const MenuDef &def, int slot) const;
+
+	// True if the player in `slot` is currently spectating (via the resolver; false if unset).
+	bool IsSpectator(int slot) const;
+
 	// Built-in phrase key for a label (seeds MenuDef, restores on SetMenuLabel("")).
 	static const char *DefaultLabelKey(MenuLabel label);
 	// Translate this menu's label for the player viewing in `slot`.
@@ -293,6 +312,9 @@ private:
 
 	// Maps a slot to its language key for label translation (see SetLanguageResolver).
 	std::function<std::string(int)> m_langResolver;
+
+	// Maps a slot to "is spectating" for the spectator-safe Exit key (see SetSpectatorResolver).
+	std::function<bool(int)> m_isSpectatorResolver;
 };
 
 extern MenuManager g_MenuManager;

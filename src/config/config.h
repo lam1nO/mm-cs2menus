@@ -53,6 +53,10 @@ struct MenuDefaultsCfg
 	// Решение 23.07: Back (вверх к родителю) = R, Exit (закрыть) = F.
 	std::string navBack = "r";
 	std::string navExit = "f";
+	// Выход для СПЕКТАТОРА: в спеках F занят осмотром оружия (+lookatweapon
+	// наблюдаемого) и перебивает закрытие меню, поэтому у спектатора выход — Shift.
+	// У живого игрока выход остаётся navExit (F). Динамически по слоту (см. cs2menus.cpp).
+	std::string navExitSpec = "shift";
 };
 
 struct MenusConfig

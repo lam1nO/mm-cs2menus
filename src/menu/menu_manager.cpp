@@ -501,6 +501,36 @@ std::string MenuManager::EffectiveNavLabel(const MenuDef &def, MenuNavAction act
 	}
 }
 
+bool MenuManager::IsSpectator(int slot) const
+{
+	return m_isSpectatorResolver ? m_isSpectatorResolver(slot) : false;
+}
+
+// Как EffectiveNavMask(Exit), но с учётом контекста игрока: пер-меню override имеет
+// приоритет; без него спектатор получает keyExitSpec (Shift), живой — keyExit (F).
+uint64_t MenuManager::EffectiveExitMask(const MenuDef &def, int slot) const
+{
+	uint64_t override_ = def.navOverride[static_cast<int>(MenuNavAction::Exit)].mask;
+	if (override_ == kNavDisabledSentinel)
+	{
+		return 0; // Exit явно отключён для этого меню (MenuButton::None)
+	}
+	if (override_ != 0)
+	{
+		return override_; // consumer задал свою клавишу — она едина для всех
+	}
+	return IsSpectator(slot) ? m_settings.keyExitSpec : m_settings.keyExit;
+}
+
+std::string MenuManager::EffectiveExitLabel(const MenuDef &def, int slot) const
+{
+	if (def.navOverride[static_cast<int>(MenuNavAction::Exit)].mask != 0)
+	{
+		return def.navOverride[static_cast<int>(MenuNavAction::Exit)].label;
+	}
+	return IsSpectator(slot) ? m_settings.keyExitSpecLabel : m_settings.keyExitLabel;
+}
+
 const char *MenuManager::DefaultLabelKey(MenuLabel label)
 {
 	// These double as the phrase keys in cs2menus.phrases.txt.
@@ -1065,7 +1095,8 @@ void MenuManager::PollButtons(int slot, uint64_t heldButtons, float curtime)
 	{
 		NavBack(slot);
 	}
-	else if (newly & EffectiveNavMask(*def, MenuNavAction::Exit))
+	// Exit: у спектатора — keyExitSpec (Shift), у живого — keyExit (F). Слот-зависимо.
+	else if (newly & EffectiveExitMask(*def, slot))
 	{
 		NavExit(slot);
 	}
@@ -1346,6 +1377,12 @@ void MenuManager::SetLanguageResolver(std::function<std::string(int)> resolver)
 	m_langResolver = std::move(resolver);
 }
 
+void MenuManager::SetSpectatorResolver(std::function<bool(int)> resolver)
+{
+	ScopedLock lock(m_mutex);
+	m_isSpectatorResolver = std::move(resolver);
+}
+
 void MenuManager::RefreshMenu(MenuHandle menu)
 {
 	// Rendering touches the engine, defer off-thread callers to GameFrame.
@@ -1568,7 +1605,8 @@ void MenuManager::RenderHtml(int slot)
 	bool downOn = EffectiveNavMask(*def, MenuNavAction::Down) != 0;
 	bool selectOn = EffectiveNavMask(*def, MenuNavAction::Select) != 0;
 	bool backBound = EffectiveNavMask(*def, MenuNavAction::Back) != 0;
-	bool exitOn = def->exitButton && EffectiveNavMask(*def, MenuNavAction::Exit) != 0;
+	// Exit-подсказка слот-зависима: SHIFT у спектатора, F у живого (см. EffectiveExitMask/Label).
+	bool exitOn = def->exitButton && EffectiveExitMask(*def, slot) != 0;
 
 	std::string footer;
 	auto addSegment = [&footer](const std::string &seg)
@@ -1618,7 +1656,7 @@ void MenuManager::RenderHtml(int slot)
 	}
 	if (exitOn)
 	{
-		addSegment(center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Exit)) + ": " + EffectiveNavLabel(*def, MenuNavAction::Exit));
+		addSegment(center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Exit)) + ": " + EffectiveExitLabel(*def, slot));
 	}
 
 	// Подсказки биндов — fontSize-sm (не -s): решение 23.07, мелкий -s еле читался.
