@@ -232,8 +232,40 @@ int MenuManager::AddItem(MenuHandle menu, const char *text, const char *info, bo
 	{
 		return -1;
 	}
-	def->items.push_back({text ? text : "", info ? info : "", disabled});
+	MenuItem item;
+	item.text = text ? text : "";
+	item.info = info ? info : "";
+	item.disabled = disabled;
+	def->items.push_back(std::move(item));
 	return static_cast<int>(def->items.size()) - 1;
+}
+
+int MenuManager::AddAdjustableItem(MenuHandle menu, const char *text, const char *info, float step, float minValue, float maxValue)
+{
+	ScopedLock lock(m_mutex);
+	MenuDef *def = Find(menu);
+	if (!def)
+	{
+		return -1;
+	}
+	MenuItem item;
+	item.text = text ? text : "";
+	item.info = info ? info : "";
+	item.adjustable = true;
+	item.step = step;
+	item.minValue = minValue;
+	item.maxValue = maxValue;
+	def->items.push_back(std::move(item));
+	return static_cast<int>(def->items.size()) - 1;
+}
+
+void MenuManager::SetAdjustCallback(MenuHandle menu, MenuItemAdjustFn onAdjust)
+{
+	ScopedLock lock(m_mutex);
+	if (MenuDef *def = Find(menu))
+	{
+		def->onAdjust = std::move(onAdjust);
+	}
 }
 
 int MenuManager::AddSubMenu(MenuHandle parent, const char *text, MenuHandle child, const char *info)
@@ -296,7 +328,7 @@ void MenuManager::SetMenuKey(MenuHandle menu, MenuNavAction action, MenuButton b
 	ScopedLock lock(m_mutex);
 	MenuDef *def = Find(menu);
 	int idx = static_cast<int>(action);
-	if (!def || idx < 0 || idx > static_cast<int>(MenuNavAction::Exit))
+	if (!def || idx < 0 || idx > static_cast<int>(MenuNavAction::AdjustInc))
 	{
 		return;
 	}
@@ -475,6 +507,10 @@ uint64_t MenuManager::EffectiveNavMask(const MenuDef &def, MenuNavAction action)
 			return m_settings.keySelect;
 		case MenuNavAction::Exit:
 			return m_settings.keyExit;
+		case MenuNavAction::AdjustDec:
+			return m_settings.keyAdjustDec;
+		case MenuNavAction::AdjustInc:
+			return m_settings.keyAdjustInc;
 		default:
 			return m_settings.keyBack;
 	}
@@ -496,6 +532,10 @@ std::string MenuManager::EffectiveNavLabel(const MenuDef &def, MenuNavAction act
 			return m_settings.keySelectLabel;
 		case MenuNavAction::Exit:
 			return m_settings.keyExitLabel;
+		case MenuNavAction::AdjustDec:
+			return m_settings.keyAdjustDecLabel;
+		case MenuNavAction::AdjustInc:
+			return m_settings.keyAdjustIncLabel;
 		default:
 			return m_settings.keyBackLabel;
 	}
@@ -548,6 +588,8 @@ const char *MenuManager::DefaultLabelKey(MenuLabel label)
 			return "Select";
 		case MenuLabel::Back:
 			return "Back";
+		case MenuLabel::Adjust:
+			return "Adjust";
 		case MenuLabel::Exit:
 		default:
 			return "Exit";
@@ -1079,6 +1121,11 @@ void MenuManager::PollButtons(int slot, uint64_t heldButtons, float curtime)
 		return;
 	}
 
+	// 004: A/D перехватываются ТОЛЬКО когда подсвечена adjustable-строка. На обычной строке
+	// они проваливаются в разбор ниже (в дефолтной раскладке D=Select), т.е. игнорируются как
+	// прежде в нашей раскладке (Select=E, A/D ничему не назначены).
+	bool onAdjustable = (pm.cursor >= 0 && pm.cursor < static_cast<int>(def->items.size()) && def->items[pm.cursor].adjustable);
+
 	if (newly & EffectiveNavMask(*def, MenuNavAction::Up))
 	{
 		HtmlMoveCursor(slot, -1);
@@ -1086,6 +1133,14 @@ void MenuManager::PollButtons(int slot, uint64_t heldButtons, float curtime)
 	else if (newly & EffectiveNavMask(*def, MenuNavAction::Down))
 	{
 		HtmlMoveCursor(slot, +1);
+	}
+	else if (onAdjustable && (newly & EffectiveNavMask(*def, MenuNavAction::AdjustDec)))
+	{
+		HtmlAdjust(slot, -1);
+	}
+	else if (onAdjustable && (newly & EffectiveNavMask(*def, MenuNavAction::AdjustInc)))
+	{
+		HtmlAdjust(slot, +1);
 	}
 	else if (newly & EffectiveNavMask(*def, MenuNavAction::Select))
 	{
@@ -1099,6 +1154,42 @@ void MenuManager::PollButtons(int slot, uint64_t heldButtons, float curtime)
 	else if (newly & EffectiveExitMask(*def, slot))
 	{
 		NavExit(slot);
+	}
+}
+
+void MenuManager::HtmlAdjust(int slot, int dir)
+{
+	PlayerMenu &pm = m_players[slot];
+	MenuDef *def = Find(pm.handle);
+	if (!def)
+	{
+		return;
+	}
+	int cursor = pm.cursor;
+	// Только реальная строка (не Exit-ряд / не вне диапазона) и только adjustable c колбэком.
+	if (cursor < 0 || cursor >= static_cast<int>(def->items.size()))
+	{
+		return;
+	}
+	MenuItem &item = def->items[cursor];
+	if (!item.adjustable || !def->onAdjust)
+	{
+		return;
+	}
+
+	float delta = (dir >= 0) ? item.step : -item.step;
+	MenuHandle handle = pm.handle;
+	float mn = item.minValue;
+	float mx = item.maxValue;
+	// Копируем колбэк перед вызовом: обработчик может пере-войти в API (SetItemText → RefreshMenu).
+	MenuItemAdjustFn cb = def->onAdjust;
+
+	// Значение движок НЕ хранит: потребитель применит дельту к своему префу, клэмпнет [mn,mx]
+	// и обновит текст строки через SetItemText (это и перерисует меню с новым значением).
+	DepthGuard guard(m_callbackDepth);
+	if (guard.enter())
+	{
+		cb(handle, slot, cursor, delta, mn, mx);
 	}
 }
 
@@ -1607,6 +1698,10 @@ void MenuManager::RenderHtml(int slot)
 	bool backBound = EffectiveNavMask(*def, MenuNavAction::Back) != 0;
 	// Exit-подсказка слот-зависима: SHIFT у спектатора, F у живого (см. EffectiveExitMask/Label).
 	bool exitOn = def->exitButton && EffectiveExitMask(*def, slot) != 0;
+	// 004: подсказка «менять» — только когда подсвечена adjustable-строка и обе A/D заданы.
+	bool onAdjustableRow = pm.cursor >= 0 && pm.cursor < itemCount && items[pm.cursor].adjustable;
+	bool adjustOn = onAdjustableRow && EffectiveNavMask(*def, MenuNavAction::AdjustDec) != 0
+					&& EffectiveNavMask(*def, MenuNavAction::AdjustInc) != 0;
 
 	std::string footer;
 	auto addSegment = [&footer](const std::string &seg)
@@ -1634,6 +1729,11 @@ void MenuManager::RenderHtml(int slot)
 	else if (upOn)
 	{
 		addSegment(center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Scroll)) + ": " + EffectiveNavLabel(*def, MenuNavAction::Up));
+	}
+	if (adjustOn)
+	{
+		addSegment(center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Adjust)) + ": " + EffectiveNavLabel(*def, MenuNavAction::AdjustDec) + "/"
+				   + EffectiveNavLabel(*def, MenuNavAction::AdjustInc));
 	}
 	if (selectOn)
 	{

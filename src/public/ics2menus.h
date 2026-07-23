@@ -26,7 +26,10 @@
 //  - GetItemText/GetItemInfo pointers alias internal storage, copy them, don't cache.
 //  - Don't block a main-thread callback on a worker that re-enters this API (lock is held -> deadlock).
 // 003: MenuNavAction::Exit + MenuLabel::Back (Back = только вверх, Exit = закрыть).
-#define CS2MENUS_INTERFACE "ICS2Menus003"
+// 004: регулируемые строки — MenuNavAction::AdjustDec/AdjustInc (A/D), MenuLabel::Adjust,
+//      AddAdjustableItem + SetAdjustCallback (движок маршрутит A/D подсвеченной adjustable-строки
+//      в колбёк потребителя с дельтой ±step; само значение движок НЕ хранит).
+#define CS2MENUS_INTERFACE "ICS2Menus004"
 
 // Opaque menu identifier returned by CreateMenu. 0 is the invalid sentinel.
 // A handle stays valid until DestroyMenu (or until cs2menus unloads).
@@ -76,11 +79,13 @@ enum class MenuButton : int
 // HTML-menu navigation actions whose key can be overridden per menu.
 enum class MenuNavAction : int
 {
-	Up = 0, // move cursor up
-	Down,   // move cursor down
-	Select, // activate highlighted item
-	Back,   // step to the parent submenu; no-op at a root menu (решение 23.07: R)
-	Exit,   // close the menu entirely (решение 23.07: F)
+	Up = 0,    // move cursor up
+	Down,      // move cursor down
+	Select,    // activate highlighted item
+	Back,      // step to the parent submenu; no-op at a root menu (решение 23.07: R)
+	Exit,      // close the menu entirely (решение 23.07: F)
+	AdjustDec, // 004: decrement the highlighted adjustable row (A); ignored on non-adjustable rows
+	AdjustInc, // 004: increment the highlighted adjustable row (D); ignored on non-adjustable rows
 };
 
 // Built-in text that SetMenuLabel can rename per menu.
@@ -93,6 +98,7 @@ enum class MenuLabel : int
 	Scroll,   // HTML footer, shown when only one of up/down is bound
 	Select,   // HTML footer select hint
 	Back,     // HTML footer back hint (step to parent; greyed at a root menu)
+	Adjust,   // 004: HTML footer adjust hint, shown only while an adjustable row is highlighted
 	Count,    // label count, not a valid argument
 };
 
@@ -105,6 +111,14 @@ using MenuItemSelectFn = std::function<void(MenuHandle menu, int slot, int item)
 // For Selected, this fires after the MenuItemSelectFn.
 // Use it to free per-menu state (e.g. call DestroyMenu for one-shot menus).
 using MenuEndFn = std::function<void(MenuHandle menu, int slot, MenuEndReason reason)>;
+
+// 004: fired when a player presses A/D on a highlighted adjustable row (see AddAdjustableItem).
+// `item` is the absolute index of that row. `delta` is +step (D) or -step (A).
+// `minValue`/`maxValue` are the bounds the row was created with, passed for convenience so a
+// generic handler can clamp without its own bookkeeping.
+// The engine does NOT store the value: the consumer reads its own preference, applies `delta`,
+// clamps to [minValue, maxValue], persists it, and calls SetItemText to reflect the new value.
+using MenuItemAdjustFn = std::function<void(MenuHandle menu, int slot, int item, float delta, float minValue, float maxValue)>;
 
 class ICS2Menus
 {
@@ -251,6 +265,23 @@ public:
 	// It's a phrase key / literal, not the translated text.
 	// Aliases internal storage, copy it, don't cache. Returns "" for an invalid handle/label.
 	virtual const char *GetMenuLabel(MenuHandle menu, MenuLabel label) = 0;
+
+	// --- 004: adjustable rows (A/D tune a number without typing) ---
+
+	// Append an adjustable numeric row. While it is highlighted in an HTML menu, the AdjustDec (A)
+	// and AdjustInc (D) keys fire the menu's adjust callback (see SetAdjustCallback) with ±`step`
+	// and the [minValue, maxValue] bounds. `info` is the opaque tag echoed back, as with AddItem.
+	// The engine stores only the row descriptor, never the value itself — the consumer owns the
+	// value in its own preference and updates the row text via SetItemText after each adjust.
+	// A/D on a non-adjustable row is ignored. Selecting an adjustable row still fires onSelect,
+	// so an item can pair A/D tuning with an E action if desired.
+	// Returns the new item's absolute index, or -1 on failure.
+	virtual int AddAdjustableItem(MenuHandle menu, const char *text, const char *info, float step, float minValue, float maxValue) = 0;
+
+	// Register the per-menu callback fired when A/D is pressed on a highlighted adjustable row.
+	// Pass null to clear it. Same threading/lifetime rules as onSelect: it runs on the main thread
+	// and may capture pointers into your plugin, so DestroyMenu every menu before your DLL unloads.
+	virtual void SetAdjustCallback(MenuHandle menu, MenuItemAdjustFn onAdjust) = 0;
 };
 
 #endif // _INCLUDE_ICS2MENUS_H_

@@ -41,6 +41,10 @@ struct MenuManagerSettings
 	// Выход для СПЕКТАТОРА: SHIFT (IN_SPEED). В спеках F занят осмотром оружия
 	// наблюдаемого игрока, поэтому спектатору выход — Shift (подставляется по слоту).
 	uint64_t keyExitSpec = 0x10000;  // SHIFT (IN_SPEED)
+	// 004: регулировка подсвеченной adjustable-строки. A/D свободны в раскладке
+	// (выбор — E), поэтому «меньше/больше» на них.
+	uint64_t keyAdjustDec = 0x200;   // A (IN_MOVELEFT) — уменьшить
+	uint64_t keyAdjustInc = 0x400;   // D (IN_MOVERIGHT) — увеличить
 	// HTML: display labels for the footer key hints (uppercased key names).
 	std::string keyUpLabel = "W";
 	std::string keyDownLabel = "S";
@@ -48,6 +52,8 @@ struct MenuManagerSettings
 	std::string keyBackLabel = "R";
 	std::string keyExitLabel = "F";
 	std::string keyExitSpecLabel = "SHIFT";
+	std::string keyAdjustDecLabel = "A";
+	std::string keyAdjustIncLabel = "D";
 	// HTML: hex colors for markup.
 	std::string navColor = "#ff2ee7";
 	std::string footerColor = "#909090";
@@ -62,6 +68,8 @@ public:
 	// --- API ---
 	MenuHandle CreateMenu(MenuType type, const char *title, MenuItemSelectFn onSelect);
 	int AddItem(MenuHandle menu, const char *text, const char *info, bool disabled);
+	int AddAdjustableItem(MenuHandle menu, const char *text, const char *info, float step, float minValue, float maxValue);
+	void SetAdjustCallback(MenuHandle menu, MenuItemAdjustFn onAdjust);
 	int AddSubMenu(MenuHandle parent, const char *text, MenuHandle child, const char *info);
 	void SetTitle(MenuHandle menu, const char *title);
 	void SetExitButton(MenuHandle menu, bool enabled);
@@ -175,6 +183,11 @@ private:
 		bool disabled = false;
 		// Selecting this item navigates into another menu instead of firing onSelect.
 		MenuHandle submenu = kInvalidMenuHandle;
+		// 004: регулируемая строка — A/D зовут onAdjust с ±step. Значение хранит потребитель.
+		bool adjustable = false;
+		float step = 0.0f;
+		float minValue = 0.0f;
+		float maxValue = 0.0f;
 	};
 
 	// Per-menu HTML nav-key overrides, indexed by MenuNavAction (Up/Down/Select/Back/Exit).
@@ -191,6 +204,7 @@ private:
 		std::string title;
 		std::vector<MenuItem> items;
 		MenuItemSelectFn onSelect;
+		MenuItemAdjustFn onAdjust; // 004: A/D по adjustable-строке
 		MenuEndFn onEnd;
 		bool exitButton = true;
 		bool closeOnSelect = true;
@@ -198,7 +212,8 @@ private:
 		int startItem = 0;     // item the menu opens on
 		// Set when this menu is reached as a submenu, so Back returns to the parent.
 		MenuHandle parent = kInvalidMenuHandle;
-		NavOverride navOverride[static_cast<int>(MenuNavAction::Exit) + 1];
+		// Indexed by MenuNavAction (Up..AdjustInc). mask 0 = inherit the server config binding.
+		NavOverride navOverride[static_cast<int>(MenuNavAction::AdjustInc) + 1];
 		// Built-in labels, seeded from settings at CreateMenu, indexed by MenuLabel.
 		std::string labels[static_cast<int>(MenuLabel::Count)];
 	};
@@ -250,6 +265,9 @@ private:
 
 	// html navigation
 	void HtmlMoveCursor(int slot, int delta);
+	// 004: route A/D on a highlighted adjustable row to onAdjust with ±step. HTML only.
+	// No-op if the cursor isn't on an adjustable item or no callback is set. dir: +1 inc, -1 dec.
+	void HtmlAdjust(int slot, int dir);
 	// Activate the cursor row (exit row closes, else selects the item). HTML only.
 	void HtmlNavSelect(int slot);
 	// Step back to the parent submenu, or exit the menu. Chat or HTML.

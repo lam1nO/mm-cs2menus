@@ -99,6 +99,14 @@ static void ConfigHandler(const std::string &section, const std::string &key, co
 		{
 			cfg->menu.navExitSpec = ToLower(value);
 		}
+		else if (k == "navadjustdec")
+		{
+			cfg->menu.navAdjustDec = ToLower(value);
+		}
+		else if (k == "navadjustinc")
+		{
+			cfg->menu.navAdjustInc = ToLower(value);
+		}
 	}
 }
 

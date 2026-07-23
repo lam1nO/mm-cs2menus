@@ -168,6 +168,16 @@ class CS2MenusAPI : public ICS2Menus
 		return g_MenuManager.AddItem(menu, text, info, disabled);
 	}
 
+	int AddAdjustableItem(MenuHandle menu, const char *text, const char *info, float step, float minValue, float maxValue) override
+	{
+		return g_MenuManager.AddAdjustableItem(menu, text, info, step, minValue, maxValue);
+	}
+
+	void SetAdjustCallback(MenuHandle menu, MenuItemAdjustFn onAdjust) override
+	{
+		g_MenuManager.SetAdjustCallback(menu, std::move(onAdjust));
+	}
+
 	void SetTitle(MenuHandle menu, const char *title) override
 	{
 		g_MenuManager.SetTitle(menu, title);
@@ -553,6 +563,9 @@ static void LoadAndApplyConfig()
 	applyNav(g_MenusConfig.menu.navExit, settings.keyExit, settings.keyExitLabel);
 	// Выход для спектатора (в спеках F занят осмотром оружия) — отдельный keyExitSpec.
 	applyNav(g_MenusConfig.menu.navExitSpec, settings.keyExitSpec, settings.keyExitSpecLabel);
+	// 004: A/D для регулировки чисел на adjustable-строках.
+	applyNav(g_MenusConfig.menu.navAdjustDec, settings.keyAdjustDec, settings.keyAdjustDecLabel);
+	applyNav(g_MenusConfig.menu.navAdjustInc, settings.keyAdjustInc, settings.keyAdjustIncLabel);
 
 	g_MenuManager.Configure(settings);
 

@@ -29,9 +29,11 @@
 // passed as plain int across the boundary.
 //   type:   -1 Default, 0 Chat, 1 Html
 //   reason:  0 Selected, 1 Exit, 2 Timeout, 3 Disconnect, 4 Cancelled, 5 Destroyed
-//   action:  0 Up, 1 Down, 2 Select, 3 Back
+//   action:  0 Up, 1 Down, 2 Select, 3 Back, 4 Exit, 5 AdjustDec, 6 AdjustInc
 //   button:  0 Default, 1..13 W/A/S/D/Use/Speed/Duck/Jump/Reload/Attack/Attack2/Score/Inspect, 14 None
-//   label:   0 Exit, 1 NextPage, 2 PrevPage, 3 Move, 4 Scroll, 5 Select
+//   label:   0 Exit, 1 NextPage, 2 PrevPage, 3 Move, 4 Scroll, 5 Select, 6 Back, 7 Adjust
+// NOTE: the adjustable-row API (AddAdjustableItem / SetAdjustCallback, interface 004) is C++-only;
+//   it is not exposed through this flat C ABI yet.
 
 typedef uint32_t cs2m_handle; // 0 = invalid
 

@@ -57,6 +57,10 @@ struct MenuDefaultsCfg
 	// наблюдаемого) и перебивает закрытие меню, поэтому у спектатора выход — Shift.
 	// У живого игрока выход остаётся navExit (F). Динамически по слоту (см. cs2menus.cpp).
 	std::string navExitSpec = "shift";
+	// 004: регулировка чисел на подсвеченной adjustable-строке. A/D свободны (выбор — E),
+	// поэтому «меньше/больше» на них. "none"/пусто — отключить.
+	std::string navAdjustDec = "a";
+	std::string navAdjustInc = "d";
 };
 
 struct MenusConfig
