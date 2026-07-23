@@ -25,7 +25,8 @@
 //  - DestroyMenu off-thread invalidates the handle at once but skips the Destroyed callback.
 //  - GetItemText/GetItemInfo pointers alias internal storage, copy them, don't cache.
 //  - Don't block a main-thread callback on a worker that re-enters this API (lock is held -> deadlock).
-#define CS2MENUS_INTERFACE "ICS2Menus002"
+// 003: MenuNavAction::Exit + MenuLabel::Back (Back = только вверх, Exit = закрыть).
+#define CS2MENUS_INTERFACE "ICS2Menus003"
 
 // Opaque menu identifier returned by CreateMenu. 0 is the invalid sentinel.
 // A handle stays valid until DestroyMenu (or until cs2menus unloads).
@@ -78,7 +79,8 @@ enum class MenuNavAction : int
 	Up = 0, // move cursor up
 	Down,   // move cursor down
 	Select, // activate highlighted item
-	Back,   // close / exit
+	Back,   // step to the parent submenu; no-op at a root menu (решение 23.07: R)
+	Exit,   // close the menu entirely (решение 23.07: F)
 };
 
 // Built-in text that SetMenuLabel can rename per menu.
@@ -90,6 +92,7 @@ enum class MenuLabel : int
 	Move,     // HTML footer, shown when both up and down are bound
 	Scroll,   // HTML footer, shown when only one of up/down is bound
 	Select,   // HTML footer select hint
+	Back,     // HTML footer back hint (step to parent; greyed at a root menu)
 	Count,    // label count, not a valid argument
 };
 

@@ -33,15 +33,17 @@ struct MenuManagerSettings
 	// HTML: rows visible at once (clamped 1..MENU_MAX_HTML_VISIBLE).
 	int htmlVisibleItems = MENU_MAX_HTML_VISIBLE;
 	// HTML: button bitmasks (IN_*) for navigation. Defaults = WASD.
-	uint64_t keyUp = 0x8;       // W (IN_FORWARD)
-	uint64_t keyDown = 0x10;    // S (IN_BACK)
-	uint64_t keySelect = 0x400; // D (IN_MOVERIGHT)
-	uint64_t keyBack = 0x200;   // A (IN_MOVELEFT)
+	uint64_t keyUp = 0x8;            // W (IN_FORWARD)
+	uint64_t keyDown = 0x10;         // S (IN_BACK)
+	uint64_t keySelect = 0x400;      // D (IN_MOVERIGHT)
+	uint64_t keyBack = 0x2000;       // R (IN_RELOAD) — вверх к родителю (решение 23.07)
+	uint64_t keyExit = 0x800000000;  // F (IN_LOOKATWEAPON) — закрыть меню
 	// HTML: display labels for the footer key hints (uppercased key names).
 	std::string keyUpLabel = "W";
 	std::string keyDownLabel = "S";
 	std::string keySelectLabel = "D";
-	std::string keyBackLabel = "A";
+	std::string keyBackLabel = "R";
+	std::string keyExitLabel = "F";
 	// HTML: hex colors for markup.
 	std::string navColor = "#ff2ee7";
 	std::string footerColor = "#909090";
@@ -165,7 +167,7 @@ private:
 		MenuHandle submenu = kInvalidMenuHandle;
 	};
 
-	// Per-menu HTML nav-key overrides, indexed by MenuNavAction (Up/Down/Select/Back).
+	// Per-menu HTML nav-key overrides, indexed by MenuNavAction (Up/Down/Select/Back/Exit).
 	// mask 0 = inherit the server config binding for that action.
 	struct NavOverride
 	{
@@ -186,7 +188,7 @@ private:
 		int startItem = 0;     // item the menu opens on
 		// Set when this menu is reached as a submenu, so Back returns to the parent.
 		MenuHandle parent = kInvalidMenuHandle;
-		NavOverride navOverride[4];
+		NavOverride navOverride[static_cast<int>(MenuNavAction::Exit) + 1];
 		// Built-in labels, seeded from settings at CreateMenu, indexed by MenuLabel.
 		std::string labels[static_cast<int>(MenuLabel::Count)];
 	};
@@ -241,7 +243,9 @@ private:
 	// Activate the cursor row (exit row closes, else selects the item). HTML only.
 	void HtmlNavSelect(int slot);
 	// Step back to the parent submenu, or exit the menu. Chat or HTML.
-	void NavClose(int slot);
+	// Back: только вверх к родителю (no-op на корне); Exit: закрыть меню.
+	void NavBack(int slot);
+	void NavExit(int slot);
 	// Apply a chat-menu number (1..page select, Next/Prev/Exit reserved). True if consumed.
 	bool ApplyChatNumber(int slot, int num);
 

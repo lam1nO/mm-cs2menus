@@ -296,7 +296,7 @@ void MenuManager::SetMenuKey(MenuHandle menu, MenuNavAction action, MenuButton b
 	ScopedLock lock(m_mutex);
 	MenuDef *def = Find(menu);
 	int idx = static_cast<int>(action);
-	if (!def || idx < 0 || idx > static_cast<int>(MenuNavAction::Back))
+	if (!def || idx < 0 || idx > static_cast<int>(MenuNavAction::Exit))
 	{
 		return;
 	}
@@ -444,9 +444,9 @@ int MenuManager::GetStartItem(MenuHandle menu) const
 
 bool MenuManager::HtmlShowsExitRow(const MenuDef &def) const
 {
-	// Must be exitable, and either explicitly requested or forced because the Back
+	// Must be exitable, and either explicitly requested or forced because the Exit
 	// key is disabled (otherwise the player would have no way out but the timeout).
-	return def.exitButton && (def.exitItem || EffectiveNavMask(def, MenuNavAction::Back) == 0);
+	return def.exitButton && (def.exitItem || EffectiveNavMask(def, MenuNavAction::Exit) == 0);
 }
 
 int MenuManager::HtmlRowCount(const MenuDef &def) const
@@ -473,6 +473,8 @@ uint64_t MenuManager::EffectiveNavMask(const MenuDef &def, MenuNavAction action)
 			return m_settings.keyDown;
 		case MenuNavAction::Select:
 			return m_settings.keySelect;
+		case MenuNavAction::Exit:
+			return m_settings.keyExit;
 		default:
 			return m_settings.keyBack;
 	}
@@ -492,6 +494,8 @@ std::string MenuManager::EffectiveNavLabel(const MenuDef &def, MenuNavAction act
 			return m_settings.keyDownLabel;
 		case MenuNavAction::Select:
 			return m_settings.keySelectLabel;
+		case MenuNavAction::Exit:
+			return m_settings.keyExitLabel;
 		default:
 			return m_settings.keyBackLabel;
 	}
@@ -512,6 +516,8 @@ const char *MenuManager::DefaultLabelKey(MenuLabel label)
 			return "Scroll";
 		case MenuLabel::Select:
 			return "Select";
+		case MenuLabel::Back:
+			return "Back";
 		case MenuLabel::Exit:
 		default:
 			return "Exit";
@@ -1057,7 +1063,11 @@ void MenuManager::PollButtons(int slot, uint64_t heldButtons, float curtime)
 	}
 	else if (newly & EffectiveNavMask(*def, MenuNavAction::Back))
 	{
-		NavClose(slot);
+		NavBack(slot);
+	}
+	else if (newly & EffectiveNavMask(*def, MenuNavAction::Exit))
+	{
+		NavExit(slot);
 	}
 }
 
@@ -1080,7 +1090,7 @@ void MenuManager::HtmlNavSelect(int slot)
 	}
 }
 
-void MenuManager::NavClose(int slot)
+void MenuManager::NavBack(int slot)
 {
 	PlayerMenu &pm = m_players[slot];
 	MenuDef *def = Find(pm.handle);
@@ -1088,12 +1098,22 @@ void MenuManager::NavClose(int slot)
 	{
 		return;
 	}
-	// Step up to the parent in a submenu, else exit (if exitable).
+	// Только вверх к родителю; на корневом меню — no-op (бинд в футере серый).
 	if (def->parent != kInvalidMenuHandle && Find(def->parent))
 	{
 		SwitchMenu(slot, def->parent);
 	}
-	else if (def->exitButton)
+}
+
+void MenuManager::NavExit(int slot)
+{
+	PlayerMenu &pm = m_players[slot];
+	MenuDef *def = Find(pm.handle);
+	if (!def)
+	{
+		return;
+	}
+	if (def->exitButton)
 	{
 		EndDisplay(slot, MenuEndReason::Exit);
 	}
@@ -1142,7 +1162,10 @@ void MenuManager::CommandNav(int slot, MenuNavAction action, float curtime)
 			}
 			break;
 		case MenuNavAction::Back:
-			NavClose(slot);
+			NavBack(slot);
+			break;
+		case MenuNavAction::Exit:
+			NavExit(slot);
 			break;
 	}
 }
@@ -1544,7 +1567,8 @@ void MenuManager::RenderHtml(int slot)
 	bool upOn = EffectiveNavMask(*def, MenuNavAction::Up) != 0;
 	bool downOn = EffectiveNavMask(*def, MenuNavAction::Down) != 0;
 	bool selectOn = EffectiveNavMask(*def, MenuNavAction::Select) != 0;
-	bool backOn = def->exitButton && EffectiveNavMask(*def, MenuNavAction::Back) != 0;
+	bool backBound = EffectiveNavMask(*def, MenuNavAction::Back) != 0;
+	bool exitOn = def->exitButton && EffectiveNavMask(*def, MenuNavAction::Exit) != 0;
 
 	std::string footer;
 	auto addSegment = [&footer](const std::string &seg)
@@ -1577,14 +1601,30 @@ void MenuManager::RenderHtml(int slot)
 	{
 		addSegment(center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Select)) + ": " + EffectiveNavLabel(*def, MenuNavAction::Select));
 	}
-	if (backOn)
+	if (backBound)
 	{
-		addSegment(center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Exit)) + ": " + EffectiveNavLabel(*def, MenuNavAction::Back));
+		// «Назад» на корневом меню — серый (некуда возвращаться), нажатие — no-op.
+		std::string seg =
+			center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Back)) + ": " + EffectiveNavLabel(*def, MenuNavAction::Back);
+		bool hasParent = def->parent != kInvalidMenuHandle && Find(def->parent) != nullptr;
+		if (!hasParent)
+		{
+			// Без вложения <font> (Panorama его переваривает не всегда): выходим из
+			// внешнего футерного font, красим серым, возвращаемся в футерный.
+			seg = "</font><font color='" + m_settings.disabledColor + "' class='fontSize-sm'>" + seg + "</font><font color='"
+				  + m_settings.footerColor + "' class='fontSize-sm'>";
+		}
+		addSegment(seg);
+	}
+	if (exitOn)
+	{
+		addSegment(center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Exit)) + ": " + EffectiveNavLabel(*def, MenuNavAction::Exit));
 	}
 
+	// Подсказки биндов — fontSize-sm (не -s): решение 23.07, мелкий -s еле читался.
 	html += "<font color='";
 	html += m_settings.footerColor;
-	html += "' class='fontSize-s'>";
+	html += "' class='fontSize-sm'>";
 	html += footer;
 	html += "</font>";
 

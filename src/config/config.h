@@ -31,7 +31,7 @@ struct MenuDefaultsCfg
 	// Rows visible at once in an HTML menu (scrolling window, clamped 1-6).
 	int htmlVisibleItems = 6;
 	// Show a selectable "Exit" row in HTML menus.
-	// Auto-forced on anyway when the Back key is disabled, so the menu is never left unexitable.
+	// Auto-forced on anyway when the Exit key is disabled, so the menu is never left unexitable.
 	bool htmlExitItem = false;
 	// Hex colors for HTML markup.
 	std::string htmlNavColor = "#ff2ee7";      // cursor row + marker
@@ -45,11 +45,14 @@ struct MenuDefaultsCfg
 
 	// HTML navigation key bindings (by name). Valid names:
 	//   w s a d, e/use, shift/speed, ctrl/duck, space/jump, r/reload,
-	//   mouse1/attack, mouse2/attack2, tab. Unknown names keep the default.
+	//   f/inspect/lookatweapon, mouse1/attack, mouse2/attack2, tab.
+	//   Unknown names keep the default.
 	std::string navUp = "w";
 	std::string navDown = "s";
 	std::string navSelect = "d";
-	std::string navBack = "a";
+	// Решение 23.07: Back (вверх к родителю) = R, Exit (закрыть) = F.
+	std::string navBack = "r";
+	std::string navExit = "f";
 };
 
 struct MenusConfig

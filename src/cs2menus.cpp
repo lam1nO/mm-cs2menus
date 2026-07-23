@@ -525,6 +525,7 @@ static void LoadAndApplyConfig()
 	applyNav(g_MenusConfig.menu.navDown, settings.keyDown, settings.keyDownLabel);
 	applyNav(g_MenusConfig.menu.navSelect, settings.keySelect, settings.keySelectLabel);
 	applyNav(g_MenusConfig.menu.navBack, settings.keyBack, settings.keyBackLabel);
+	applyNav(g_MenusConfig.menu.navExit, settings.keyExit, settings.keyExitLabel);
 
 	g_MenuManager.Configure(settings);
 
@@ -676,7 +677,8 @@ void CS2MenusPlugin::Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnecti
 	RETURN_META(MRES_IGNORED);
 }
 
-// Map a bare command body to a nav action. "menu_close" also answers to exit/back.
+// Map a bare command body to a nav action. "menu_close"/"menu_exit" close the menu;
+// "menu_back" steps to the parent (решение 23.07: раздельные back/exit).
 static bool MatchMenuNavBody(const char *body, MenuNavAction &action)
 {
 	if (!strcmp(body, "menu_up"))
@@ -694,9 +696,14 @@ static bool MatchMenuNavBody(const char *body, MenuNavAction &action)
 		action = MenuNavAction::Select;
 		return true;
 	}
-	if (!strcmp(body, "menu_close") || !strcmp(body, "menu_exit") || !strcmp(body, "menu_back"))
+	if (!strcmp(body, "menu_back"))
 	{
 		action = MenuNavAction::Back;
+		return true;
+	}
+	if (!strcmp(body, "menu_close") || !strcmp(body, "menu_exit"))
+	{
+		action = MenuNavAction::Exit;
 		return true;
 	}
 	return false;
@@ -814,6 +821,11 @@ CON_COMMAND_F(mm_menu_select, "Select a menu item: no arg = highlighted row, a n
 }
 
 CON_COMMAND_F(mm_menu_close, "Close / exit the open menu.", FCVAR_CLIENT_CAN_EXECUTE | FCVAR_GAMEDLL)
+{
+	RunMenuNavCommand(context, MenuNavAction::Exit);
+}
+
+CON_COMMAND_F(mm_menu_back, "Step back to the parent menu (no-op at a root menu).", FCVAR_CLIENT_CAN_EXECUTE | FCVAR_GAMEDLL)
 {
 	RunMenuNavCommand(context, MenuNavAction::Back);
 }
