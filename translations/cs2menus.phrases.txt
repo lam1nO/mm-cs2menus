@@ -1,33 +1,45 @@
-// Built-in menu labels. 
+// Built-in menu labels.
 
 "Phrases"
 {
 	"Exit"
 	{
 		"en"	"Exit"
+		"ru"	"Выход"
 	}
 	"Next Page"
 	{
 		"en"	"Next Page"
+		"ru"	"След. стр."
 	}
 	"Previous Page"
 	{
 		"en"	"Previous Page"
+		"ru"	"Пред. стр."
 	}
 	"Move"
 	{
 		"en"	"Move"
+		"ru"	"Движение"
 	}
 	"Scroll"
 	{
 		"en"	"Scroll"
+		"ru"	"Прокрутка"
 	}
 	"Select"
 	{
 		"en"	"Select"
+		"ru"	"Выбрать"
 	}
 	"Back"
 	{
 		"en"	"Back"
+		"ru"	"Назад"
+	}
+	"Adjust"
+	{
+		"en"	"Adjust"
+		"ru"	"Настройка"
 	}
 }
