@@ -101,6 +101,13 @@ static constexpr int kHtmlClearDurationSecs = 1;
 static const char *kHtmlClearContent = "<font></font>";
 static const char *kHtmlMarker = ""; // cyber: курсор обозначается только цветом строки (минимализм, без ▶)
 
+// 004: стрелки-обрамление значения adjustable-строки (◄ значение ►) — намёк, что её крутят A/D.
+// HTML-сущности center-HTML CS2. Если глиф не отрисуется в игре — заменить на ASCII "&lt;" / "&gt;".
+static const char *kHtmlAdjustLeftArrow = "&#9668;";  // ◄
+static const char *kHtmlAdjustRightArrow = "&#9658;"; // ►
+// Прибавка к оценке ширины строки за стрелки+пробелы «◄ … ►» (для бюджета переноса, см. RenderHtml).
+static constexpr int kHtmlAdjustArrowsWidth = 4;
+
 // Cap on nested menu callbacks, so a consumer that re-displays a menu inside its
 // own onSelect/onEnd can't recurse the server into a stack overflow.
 static constexpr int kMaxCallbackDepth = 16;
@@ -452,6 +459,7 @@ void MenuManager::RemoveAllItems(MenuHandle menu)
 		if (pm.active && pm.handle == menu)
 		{
 			pm.cursor = 0;
+			pm.lastAdjustDir = 0; // 004: пункты сброшены — сбрасываем подсветку стрелки
 			pm.page = 0;
 		}
 	}
@@ -659,6 +667,7 @@ bool MenuManager::DisplayLocked(MenuHandle menu, int slot, float duration)
 	pm.handle = menu;
 	// Open on the configured start item (clamped at render time).
 	pm.cursor = def->startItem;
+	pm.lastAdjustDir = 0; // 004: свежее состояние регулировки
 	pm.page = (m_itemsPerPage > 0) ? def->startItem / m_itemsPerPage : 0;
 	pm.expireTime = (duration > 0.0f) ? (m_curtime + duration) : 0.0f;
 	pm.prevButtons = 0;
@@ -944,6 +953,7 @@ void MenuManager::SwitchMenu(int slot, MenuHandle handle)
 
 	pm.handle = handle;
 	pm.cursor = newDef->startItem;
+	pm.lastAdjustDir = 0; // 004: другое меню — сбрасываем подсветку стрелки
 	pm.page = (m_itemsPerPage > 0) ? newDef->startItem / m_itemsPerPage : 0;
 	// Re-baseline buttons so the key that triggered the switch doesn't act again in the new menu.
 	pm.prevButtons = 0;
@@ -1177,6 +1187,10 @@ void MenuManager::HtmlAdjust(int slot, int dir)
 		return;
 	}
 
+	// Запоминаем направление до колбэка: SetItemText внутри него перерисует меню,
+	// и RenderHtml подсветит соответствующую стрелку (◄ на A, ► на D).
+	pm.lastAdjustDir = (dir >= 0) ? 1 : -1;
+
 	float delta = (dir >= 0) ? item.step : -item.step;
 	MenuHandle handle = pm.handle;
 	float mn = item.minValue;
@@ -1344,6 +1358,7 @@ void MenuManager::HtmlMoveCursor(int slot, int delta)
 		return;
 	}
 	pm.cursor = next;
+	pm.lastAdjustDir = 0; // 004: ушли на другую строку — подсветка стрелки не переносится
 	RenderHtml(slot);
 }
 
@@ -1686,7 +1701,30 @@ void MenuManager::RenderHtml(int slot)
 		}
 
 		const char *base = item.disabled ? m_settings.disabledColor.c_str() : (selected ? m_settings.navColor.c_str() : "#FFFFFF");
-		html += center_html::ColorizeChat(item.text, base, "fontSize-sm");
+
+		if (item.adjustable)
+		{
+			// 004: значение в обрамлении стрелок ◄ ► — видно, что строку крутят A/D.
+			// Активная сторона (последнее нажатие на этой подсвеченной строке) — акцентом navColor,
+			// иначе стрелки приглушены footerColor (просто «регулируемо»).
+			bool leftActive = selected && pm.lastAdjustDir < 0;
+			bool rightActive = selected && pm.lastAdjustDir > 0;
+			html += "<font color='";
+			html += leftActive ? m_settings.navColor : m_settings.footerColor;
+			html += "' class='fontSize-sm'>";
+			html += kHtmlAdjustLeftArrow;
+			html += " </font>";
+			html += center_html::ColorizeChat(item.text, base, "fontSize-sm");
+			html += "<font color='";
+			html += rightActive ? m_settings.navColor : m_settings.footerColor;
+			html += "' class='fontSize-sm'> ";
+			html += kHtmlAdjustRightArrow;
+			html += "</font>";
+		}
+		else
+		{
+			html += center_html::ColorizeChat(item.text, base, "fontSize-sm");
+		}
 		html += "<br>";
 	}
 

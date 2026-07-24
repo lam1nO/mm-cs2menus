@@ -224,6 +224,9 @@ private:
 		MenuHandle handle = kInvalidMenuHandle;
 		int page = 0;            // chat pagination
 		int cursor = 0;          // html selected option (abs index)
+		// 004: направление последней регулировки текущей adjustable-строки: -1 A, +1 D, 0 нет.
+		// Красит соответствующую стрелку ◄/► акцентом. Сбрасывается при смене курсора/меню.
+		int lastAdjustDir = 0;
 		float expireTime = 0.0f; // absolute game time, 0 = no expire
 		uint64_t prevButtons = 0;
 		bool buttonsPrimed = false;
