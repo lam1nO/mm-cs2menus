@@ -113,8 +113,8 @@ static constexpr int kHtmlAdjustArrowsWidth = 4;
 // kHtmlWrapChars — примерно символов в строку (fontSize-sm) до переноса.
 // Оба зависят от шрифта/разрешения — КАЛИБРУЮТСЯ вживую: футер всё ещё налезает → уменьшить;
 // видно слишком мало пунктов → увеличить.
-static constexpr int kHtmlPanelLineBudget = 12;
-static constexpr int kHtmlWrapChars = 34;
+static constexpr int kHtmlPanelLineBudget = 10;
+static constexpr int kHtmlWrapChars = 28;
 
 // Cap on nested menu callbacks, so a consumer that re-displays a menu inside its
 // own onSelect/onEnd can't recurse the server into a stack overflow.
