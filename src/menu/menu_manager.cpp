@@ -109,11 +109,15 @@ static const char *kHtmlAdjustRightArrow = "&#9658;"; // ►
 static constexpr int kHtmlAdjustArrowsWidth = 4;
 
 // Бюджет высоты center-HTML панели, чтобы футер не налезал на пункты (см. RenderHtml).
-// kHtmlPanelLineBudget — сколько ЭКРАННЫХ строк панель показывает без перекрытия (заголовок+пункты+футер).
-// kHtmlWrapChars — примерно символов в строку (fontSize-sm) до переноса.
-// Оба зависят от шрифта/разрешения — КАЛИБРУЮТСЯ вживую: футер всё ещё налезает → уменьшить;
-// видно слишком мало пунктов → увеличить.
-static constexpr int kHtmlPanelLineBudget = 10;
+// kHtmlPanelLineBudget — сколько ЭКРАННЫХ строк панель физически показывает целиком.
+// Живой тест (Jumpstats, 10 пунктов): при 10 нижняя строка футера обрезалась снизу, при этом
+// предпоследняя была видна → реальная вместимость = 9. Ставим 9. Панорама-HUD масштабируется
+// с разрешением равномерно, так что «строк влезает» примерно одинаково на разных экранах.
+// kHtmlWrapChars — примерно символов в строку (fontSize-sm) до переноса; ЗАВЫШЕНИЕ безопасно
+// (переоценка высоты футера лишь ужимает окно пунктов, но футер не режет). КАЛИБРУЕТСЯ вживую.
+// Футер вдобавок укорочен (см. RenderHtml: «КЛАВИША подпись», компактные ru-подписи) — на типовом
+// меню он теперь укладывается в одну экранную строку, что и снимает обрезку.
+static constexpr int kHtmlPanelLineBudget = 9;
 static constexpr int kHtmlWrapChars = 28;
 
 // Cap on nested menu callbacks, so a consumer that re-displays a menu inside its
@@ -1740,6 +1744,7 @@ void MenuManager::RenderHtml(int slot)
 					&& EffectiveNavMask(*def, MenuNavAction::AdjustInc) != 0;
 
 	std::string footer;
+	// Разделитель — узкий средний пункт (&#183; = ·) с пробелами; легче и уже, чем « | ».
 	auto addSegment = [&footer](const std::string &seg)
 	{
 		if (seg.empty())
@@ -1748,38 +1753,44 @@ void MenuManager::RenderHtml(int slot)
 		}
 		if (!footer.empty())
 		{
-			footer += " | ";
+			footer += " &#183; ";
 		}
 		footer += seg;
 	};
 
+	// Компактный сегмент «КЛАВИША подпись» (клавиша первой — игроку важна именно она).
+	// Раньше было «Подпись: КЛАВИША»; переставили и укоротили ru-подписи (Ход/Выбор/…),
+	// чтобы весь футер укладывался в ОДНУ экранную строку даже на длинных русских меню —
+	// иначе он переносился на 2-ю строку, и она (с «Выход: F») обрезалась снизу панели.
+	// keys не эскейпим: это имена клавиш из конфига (W, F, A/D…), без HTML-спецсимволов —
+	// как и в прежнем коде. Эскейпится только переводимая подпись.
+	auto hint = [&](MenuLabel label, const std::string &keys)
+	{ return keys + " " + center_html::Escape(ResolveLabel(slot, *def, label)); };
+
 	if (upOn && downOn)
 	{
-		addSegment(center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Move)) + ": " + EffectiveNavLabel(*def, MenuNavAction::Up) + "/"
-				   + EffectiveNavLabel(*def, MenuNavAction::Down));
+		addSegment(hint(MenuLabel::Move, EffectiveNavLabel(*def, MenuNavAction::Up) + "/" + EffectiveNavLabel(*def, MenuNavAction::Down)));
 	}
 	else if (downOn)
 	{
-		addSegment(center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Scroll)) + ": " + EffectiveNavLabel(*def, MenuNavAction::Down));
+		addSegment(hint(MenuLabel::Scroll, EffectiveNavLabel(*def, MenuNavAction::Down)));
 	}
 	else if (upOn)
 	{
-		addSegment(center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Scroll)) + ": " + EffectiveNavLabel(*def, MenuNavAction::Up));
+		addSegment(hint(MenuLabel::Scroll, EffectiveNavLabel(*def, MenuNavAction::Up)));
 	}
 	if (adjustOn)
 	{
-		addSegment(center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Adjust)) + ": " + EffectiveNavLabel(*def, MenuNavAction::AdjustDec) + "/"
-				   + EffectiveNavLabel(*def, MenuNavAction::AdjustInc));
+		addSegment(hint(MenuLabel::Adjust, EffectiveNavLabel(*def, MenuNavAction::AdjustDec) + "/" + EffectiveNavLabel(*def, MenuNavAction::AdjustInc)));
 	}
 	if (selectOn)
 	{
-		addSegment(center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Select)) + ": " + EffectiveNavLabel(*def, MenuNavAction::Select));
+		addSegment(hint(MenuLabel::Select, EffectiveNavLabel(*def, MenuNavAction::Select)));
 	}
 	if (backBound)
 	{
 		// «Назад» на корневом меню — серый (некуда возвращаться), нажатие — no-op.
-		std::string seg =
-			center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Back)) + ": " + EffectiveNavLabel(*def, MenuNavAction::Back);
+		std::string seg = hint(MenuLabel::Back, EffectiveNavLabel(*def, MenuNavAction::Back));
 		bool hasParent = def->parent != kInvalidMenuHandle && Find(def->parent) != nullptr;
 		if (!hasParent)
 		{
@@ -1792,7 +1803,7 @@ void MenuManager::RenderHtml(int slot)
 	}
 	if (exitOn)
 	{
-		addSegment(center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Exit)) + ": " + EffectiveExitLabel(*def, slot));
+		addSegment(hint(MenuLabel::Exit, EffectiveExitLabel(*def, slot)));
 	}
 
 	// Бюджет высоты панели: заголовок + видимые пункты + футер должны в него влезть, иначе футер

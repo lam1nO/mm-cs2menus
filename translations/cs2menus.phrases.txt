@@ -20,17 +20,17 @@
 	"Move"
 	{
 		"en"	"Move"
-		"ru"	"Движение"
+		"ru"	"Ход"
 	}
 	"Scroll"
 	{
 		"en"	"Scroll"
-		"ru"	"Прокрутка"
+		"ru"	"Скролл"
 	}
 	"Select"
 	{
 		"en"	"Select"
-		"ru"	"Выбрать"
+		"ru"	"Выбор"
 	}
 	"Back"
 	{
@@ -40,6 +40,6 @@
 	"Adjust"
 	{
 		"en"	"Adjust"
-		"ru"	"Настройка"
+		"ru"	"Настр."
 	}
 }
