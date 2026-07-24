@@ -500,6 +500,16 @@ void MenuManager::RemoveItem(MenuHandle menu, int item)
 		return;
 	}
 	def->items.erase(def->items.begin() + item);
+	// 004: курсор клэмпится в рендере, но подсветку стрелки сбрасываем явно — иначе после
+	// клэмпа она может «прилипнуть» к другой adjustable-строке без нажатия A/D.
+	for (int slot = 0; slot <= MAXPLAYERS; slot++)
+	{
+		PlayerMenu &pm = m_players[slot];
+		if (pm.active && pm.handle == menu)
+		{
+			pm.lastAdjustDir = 0;
+		}
+	}
 	RefreshMenu(menu); // RenderHtml/RenderPage clamp any now-stale cursor/page
 }
 
