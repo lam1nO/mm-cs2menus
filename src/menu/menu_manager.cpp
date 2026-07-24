@@ -108,6 +108,14 @@ static const char *kHtmlAdjustRightArrow = "&#9658;"; // ►
 // Прибавка к оценке ширины строки за стрелки+пробелы «◄ … ►» (для бюджета переноса, см. RenderHtml).
 static constexpr int kHtmlAdjustArrowsWidth = 4;
 
+// Бюджет высоты center-HTML панели, чтобы футер не налезал на пункты (см. RenderHtml).
+// kHtmlPanelLineBudget — сколько ЭКРАННЫХ строк панель показывает без перекрытия (заголовок+пункты+футер).
+// kHtmlWrapChars — примерно символов в строку (fontSize-sm) до переноса.
+// Оба зависят от шрифта/разрешения — КАЛИБРУЮТСЯ вживую: футер всё ещё налезает → уменьшить;
+// видно слишком мало пунктов → увеличить.
+static constexpr int kHtmlPanelLineBudget = 12;
+static constexpr int kHtmlWrapChars = 34;
+
 // Cap on nested menu callbacks, so a consumer that re-displays a menu inside its
 // own onSelect/onEnd can't recurse the server into a stack overflow.
 static constexpr int kMaxCallbackDepth = 16;
@@ -182,6 +190,58 @@ static bool IsNumericInput(const char *text, const std::string &prefixes, int &o
 
 	outNum = static_cast<int>(v);
 	return true;
+}
+
+// Грубая «видимая ширина» строки в символах для бюджета переноса (см. RenderHtml).
+// Пропускаем HTML-теги <...>, чат-коды цвета 0x01..0x10 и хвостовые байты UTF-8 (считаем кодовые
+// точки, иначе кириллица завышала бы длину вдвое). HTML-сущность &...; считаем за один символ.
+static int VisibleWidth(const std::string &s)
+{
+	int len = 0;
+	for (size_t i = 0; i < s.size();)
+	{
+		unsigned char c = static_cast<unsigned char>(s[i]);
+		if (c == '<') // HTML-тег целиком невидим
+		{
+			size_t e = s.find('>', i);
+			i = (e == std::string::npos) ? s.size() : e + 1;
+			continue;
+		}
+		if (c == '&') // &amp; / &#9668; и т.п. — один видимый символ
+		{
+			size_t e = s.find(';', i);
+			i = (e != std::string::npos && e - i <= 10) ? e + 1 : i + 1;
+			len++;
+			continue;
+		}
+		if (c >= 0x01 && c <= 0x10) // чат-код цвета — не виден
+		{
+			i++;
+			continue;
+		}
+		if ((c & 0xC0) == 0x80) // хвостовой байт UTF-8 — не новый символ
+		{
+			i++;
+			continue;
+		}
+		len++;
+		i++;
+	}
+	return len;
+}
+
+// Сколько экранных строк займёт текст видимой ширины visibleWidth при переносе по wrapChars.
+static int WrappedLines(int visibleWidth, int wrapChars)
+{
+	if (wrapChars < 1)
+	{
+		return 1;
+	}
+	if (visibleWidth < 1)
+	{
+		visibleWidth = 1;
+	}
+	return 1 + (visibleWidth - 1) / wrapChars;
 }
 
 void MenuManager::SetMainThread()
@@ -1646,90 +1706,18 @@ void MenuManager::RenderHtml(int slot)
 
 	// Title + position counter.
 	html += center_html::ColorizeChat(def->title, "#FFFFFF", "fontSize-m");
+	int titleVisible = VisibleWidth(def->title);
 	if (count > 0)
 	{
 		char counter[64];
 		snprintf(counter, sizeof(counter), " <font class='fontSize-s' color='#FFFFFF'>[%d/%d]</font>", pm.cursor + 1, count);
 		html += counter;
+		titleVisible += VisibleWidth(counter);
 	}
 	html += "<br>";
 
-	// Scrolling window centered on the cursor.
-	int vis = (std::min)(m_htmlVisibleItems, count);
-	int start = pm.cursor - vis / 2;
-	if (start < 0)
-	{
-		start = 0;
-	}
-	if (start + vis > count)
-	{
-		start = (std::max)(0, count - vis);
-	}
-
-	for (int i = start; i < start + vis; i++)
-	{
-		bool selected = (i == pm.cursor);
-
-		// The inline Exit row sits at index == itemCount (after the real items).
-		if (i >= itemCount)
-		{
-			if (selected)
-			{
-				html += "<font color='";
-				html += m_settings.navColor;
-				html += "' class='fontSize-sm'>";
-				html += kHtmlMarker;
-				html += "</font>";
-			}
-			html += "<font color='";
-			html += selected ? m_settings.navColor : m_settings.footerColor;
-			html += "' class='fontSize-sm'>";
-			html += center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Exit));
-			html += "</font><br>";
-			continue;
-		}
-
-		const MenuItem &item = items[i];
-
-		if (selected)
-		{
-			html += "<font color='";
-			html += m_settings.navColor;
-			html += "' class='fontSize-sm'>";
-			html += kHtmlMarker;
-			html += "</font>";
-		}
-
-		const char *base = item.disabled ? m_settings.disabledColor.c_str() : (selected ? m_settings.navColor.c_str() : "#FFFFFF");
-
-		if (item.adjustable)
-		{
-			// 004: значение в обрамлении стрелок ◄ ► — видно, что строку крутят A/D.
-			// Активная сторона (последнее нажатие на этой подсвеченной строке) — акцентом navColor,
-			// иначе стрелки приглушены footerColor (просто «регулируемо»).
-			bool leftActive = selected && pm.lastAdjustDir < 0;
-			bool rightActive = selected && pm.lastAdjustDir > 0;
-			html += "<font color='";
-			html += leftActive ? m_settings.navColor : m_settings.footerColor;
-			html += "' class='fontSize-sm'>";
-			html += kHtmlAdjustLeftArrow;
-			html += " </font>";
-			html += center_html::ColorizeChat(item.text, base, "fontSize-sm");
-			html += "<font color='";
-			html += rightActive ? m_settings.navColor : m_settings.footerColor;
-			html += "' class='fontSize-sm'> ";
-			html += kHtmlAdjustRightArrow;
-			html += "</font>";
-		}
-		else
-		{
-			html += center_html::ColorizeChat(item.text, base, "fontSize-sm");
-		}
-		html += "<br>";
-	}
-
-	// Footer key hints, adapting when a direction is disabled
-	// (a single-key scroll shows "Scroll: KEY").
+	// Footer key hints, adapting when a direction is disabled (a single-key scroll shows "Scroll: KEY").
+	// Собираем футер ДО окна прокрутки: его высота (перенос длинного футера) входит в бюджет строк панели.
 	bool upOn = EffectiveNavMask(*def, MenuNavAction::Up) != 0;
 	bool downOn = EffectiveNavMask(*def, MenuNavAction::Down) != 0;
 	bool selectOn = EffectiveNavMask(*def, MenuNavAction::Select) != 0;
@@ -1795,6 +1783,121 @@ void MenuManager::RenderHtml(int slot)
 	if (exitOn)
 	{
 		addSegment(center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Exit)) + ": " + EffectiveExitLabel(*def, slot));
+	}
+
+	// Бюджет высоты панели: заголовок + видимые пункты + футер должны в него влезть, иначе футер
+	// налезает на текст. Заголовок крупнее (fontSize-m), переносится раньше → уже wrap-порог.
+	int titleLines = WrappedLines(titleVisible, (std::max)(1, kHtmlWrapChars * 3 / 4));
+	int footerLines = WrappedLines(VisibleWidth(footer), kHtmlWrapChars);
+	int itemBudget = kHtmlPanelLineBudget - titleLines - footerLines;
+	if (itemBudget < 1)
+	{
+		itemBudget = 1; // хотя бы строку курсора показываем всегда
+	}
+
+	// Окно прокрутки центрируем на курсоре; сужаем vis, пока пункты не влезут в itemBudget
+	// (длинные переносимые лейблы «съедают» строки — иначе футер перекрывает последний пункт).
+	int vis = (std::min)(m_htmlVisibleItems, count);
+	int start = 0;
+	while (true)
+	{
+		start = pm.cursor - vis / 2;
+		if (start < 0)
+		{
+			start = 0;
+		}
+		if (start + vis > count)
+		{
+			start = (std::max)(0, count - vis);
+		}
+		int usedLines = 0;
+		for (int i = start; i < start + vis; i++)
+		{
+			if (i >= itemCount)
+			{
+				usedLines += 1; // Exit-ряд короткий — одна строка
+			}
+			else
+			{
+				int w = VisibleWidth(items[i].text);
+				if (items[i].adjustable)
+				{
+					w += kHtmlAdjustArrowsWidth; // ◄ … ► добавляют ширину
+				}
+				usedLines += WrappedLines(w, kHtmlWrapChars);
+			}
+			if (usedLines > itemBudget)
+			{
+				break; // уже не влезли — дальше можно не считать
+			}
+		}
+		if (usedLines <= itemBudget || vis <= 1)
+		{
+			break;
+		}
+		vis--;
+	}
+
+	for (int i = start; i < start + vis; i++)
+	{
+		bool selected = (i == pm.cursor);
+
+		// The inline Exit row sits at index == itemCount (after the real items).
+		if (i >= itemCount)
+		{
+			if (selected)
+			{
+				html += "<font color='";
+				html += m_settings.navColor;
+				html += "' class='fontSize-sm'>";
+				html += kHtmlMarker;
+				html += "</font>";
+			}
+			html += "<font color='";
+			html += selected ? m_settings.navColor : m_settings.footerColor;
+			html += "' class='fontSize-sm'>";
+			html += center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Exit));
+			html += "</font><br>";
+			continue;
+		}
+
+		const MenuItem &item = items[i];
+
+		if (selected)
+		{
+			html += "<font color='";
+			html += m_settings.navColor;
+			html += "' class='fontSize-sm'>";
+			html += kHtmlMarker;
+			html += "</font>";
+		}
+
+		const char *base = item.disabled ? m_settings.disabledColor.c_str() : (selected ? m_settings.navColor.c_str() : "#FFFFFF");
+
+		if (item.adjustable)
+		{
+			// 004: значение в обрамлении стрелок ◄ ► — видно, что строку крутят A/D.
+			// Активная сторона (последнее нажатие на этой подсвеченной строке) — акцентом navColor,
+			// иначе стрелки приглушены footerColor (просто «регулируемо»).
+			bool leftActive = selected && pm.lastAdjustDir < 0;
+			bool rightActive = selected && pm.lastAdjustDir > 0;
+			html += "<font color='";
+			html += leftActive ? m_settings.navColor : m_settings.footerColor;
+			html += "' class='fontSize-sm'>";
+			html += kHtmlAdjustLeftArrow;
+			html += " </font>";
+			html += center_html::ColorizeChat(item.text, base, "fontSize-sm");
+			html += "<font color='";
+			html += rightActive ? m_settings.navColor : m_settings.footerColor;
+			html += "' class='fontSize-sm'> ";
+			html += kHtmlAdjustRightArrow;
+			html += "</font>";
+		}
+		else
+		{
+			html += center_html::ColorizeChat(item.text, base, "fontSize-sm");
+		}
+		html += "<br>";
 	}
 
 	// Подсказки биндов — fontSize-sm (не -s): решение 23.07, мелкий -s еле читался.
