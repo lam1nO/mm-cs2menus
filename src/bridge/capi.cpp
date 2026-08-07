@@ -1,4 +1,4 @@
-// Flat C ABI over ICS2Menus002 for managed hosts (SwiftlyS2, CounterStrikeSharp).
+// Flat C ABI over ICS2Menus for managed hosts (SwiftlyS2, CounterStrikeSharp).
 // See src/public/cs2menus_capi.h for the contract.
 
 #define CS2MENUS_EXPORTS
@@ -7,7 +7,7 @@
 
 #include <cstring>
 
-// Defined in cs2menus.cpp: the singleton ICS2Menus002 implementation.
+// Defined in cs2menus.cpp: the singleton ICS2Menus implementation.
 // Routing through it inherits the curtime stamping and off-thread queueing the interface wrapper already does.
 extern ICS2Menus *Cs2Menus_GetLocalAPI();
 

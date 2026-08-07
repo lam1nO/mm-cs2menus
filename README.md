@@ -43,7 +43,7 @@ Pass `MenuType::Default` to use the server's configured default style.
 
 ## For plugin developers
 
-Acquire the interface via Metamod's factory (interface name `ICS2Menus002`):
+Acquire the interface via Metamod's factory (interface name from `CS2MENUS_INTERFACE`, currently `ICS2Menus005`):
 
 ```cpp
 #include "ics2menus.h"

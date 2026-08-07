@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-// Flat C ABI over ICS2Menus002 (see ics2menus.h).
+// Flat C ABI over ICS2Menus (see ics2menus.h).
 //
 // Callback lifetime: a select/end callback is a function pointer into the host's managed runtime.
 // If the host unloads/hot-reloads its plugin assembly while a menu still exists,
@@ -46,7 +46,7 @@ typedef void(CS2M_CALL *cs2m_end_cb)(cs2m_handle menu, int slot, int reason, voi
 
 // CS2M_ABI_VERSION the loaded library was built with. Gate before any other call.
 CS2M_API int CS2M_CALL cs2m_abi_version(void);
-// 1 if the underlying ICS2Menus002 instance is reachable.
+// 1 if the underlying ICS2Menus instance is reachable.
 // Reserved for future out-of-DLL acquisition, currently always 1 when the symbol resolves.
 CS2M_API int CS2M_CALL cs2m_available(void);
 
