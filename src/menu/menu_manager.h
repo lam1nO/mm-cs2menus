@@ -148,6 +148,9 @@ public:
 	void SetExternalBusy(int slot, bool busy);
 	bool GetExternalBusy(int slot) const;
 
+	// 005: строка показаний под футером панели. Подробности контракта — в ics2menus.h.
+	void SetSlotStatus(int slot, const char *text);
+
 	// Drop everything without firing callbacks. Call from plugin Unload().
 	void Shutdown();
 
@@ -237,6 +240,13 @@ private:
 		// A host UI (SwiftlyS2 / CS# menu) owns this slot's screen.
 		// While set, we refuse to display so we never fight the host for input or the HTML channel.
 		bool externalBusy = false;
+		// 005: строка показаний под футером (SetSlotStatus). Живёт на слоте, а не на меню:
+		// хэндл общий на всех зрителей, а показания у каждого свои.
+		std::string status;
+		// Статус меняется на игровом такте, а перерисовка панели — это сетевая отправка всей
+		// разметки меню. Копим изменение и отдаём его не чаще kHtmlStatusInterval.
+		bool statusDirty = false;
+		float statusReadyAt = 0.0f;
 	};
 
 	MenuDef *Find(MenuHandle menu);

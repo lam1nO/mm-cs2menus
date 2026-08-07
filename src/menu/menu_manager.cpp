@@ -113,12 +113,22 @@ static constexpr int kHtmlAdjustArrowsWidth = 4;
 // Живой тест (Jumpstats, 10 пунктов): при 10 нижняя строка футера обрезалась снизу, при этом
 // предпоследняя была видна → реальная вместимость = 9. Ставим 9. Панорама-HUD масштабируется
 // с разрешением равномерно, так что «строк влезает» примерно одинаково на разных экранах.
-// kHtmlWrapChars — примерно символов в строку (fontSize-sm) до переноса; ЗАВЫШЕНИЕ безопасно
-// (переоценка высоты футера лишь ужимает окно пунктов, но футер не режет). КАЛИБРУЕТСЯ вживую.
-// Футер вдобавок укорочен (см. RenderHtml: «КЛАВИША подпись», компактные ru-подписи) — на типовом
-// меню он теперь укладывается в одну экранную строку, что и снимает обрезку.
+// kHtmlWrapChars — примерно символов в строку (fontSize-sm) до переноса. ЗАНИЖЕНИЕ безопасно
+// (лишняя посчитанная строка лишь ужимает окно пунктов, но ничего не режет), завышение —
+// наоборот, вернёт обрезку футера снизу. КАЛИБРУЕТСЯ вживую.
+// Замер 07.08 на канарейке (cyb.107, скриншот открытого !rpmenu, спектатор): футер
+// «W/S Ход · E Выбор · R Назад · SHIFT Выход» перенёсся ПОСЛЕ слова SHIFT, т.е. 35 видимых
+// символов влезли, а полные 41 — нет; заголовок «Управление реплеем [1/5]» (24 символа
+// кеглем fontSize-m, т.е. порог 3/4 от этого числа) остался одной строкой. Отсюда вилка
+// 35..40; берём НИЖНЮЮ границу — ошибка в эту сторону стоит строки окна, в другую режет футер.
+// Прежнее значение 28 было прикидкой и занижало окно пунктов на строку почти в каждом меню.
 static constexpr int kHtmlPanelLineBudget = 9;
-static constexpr int kHtmlWrapChars = 28;
+static constexpr int kHtmlWrapChars = 35;
+// Как часто панель разрешено перерисовывать из-за смены строки показаний (SetSlotStatus).
+// Её пишет игровой такт (128/с), а перерисовка — это отправка ВСЕЙ разметки меню; 10 Гц
+// глазу неотличимы от такта, а трафик держат в разумных рамках. Троттлинг живёт здесь, а не
+// у потребителя: движок не может полагаться на то, что вызывающий себя ограничит.
+static constexpr float kHtmlStatusInterval = 0.1f;
 
 // Cap on nested menu callbacks, so a consumer that re-displays a menu inside its
 // own onSelect/onEnd can't recurse the server into a stack overflow.
@@ -909,6 +919,10 @@ void MenuManager::EndDisplay(int slot, MenuEndReason reason)
 	MenuHandle handle = pm.handle;
 	pm.active = false;
 	pm.handle = kInvalidMenuHandle;
+	// Статус принадлежит закрывшемуся показу: следующее меню на этом слоте не должно унаследовать
+	// чужие показания, а потребитель может и не узнать о закрытии (таймаут, дисконнект, Cancel).
+	pm.status.clear();
+	pm.statusDirty = false;
 
 	// Clear any HTML panel so it doesn't linger for its remaining duration.
 	if (const MenuDef *def = Find(handle))
@@ -1466,8 +1480,11 @@ void MenuManager::Tick(float curtime)
 			continue;
 		}
 		// HTML messages decay, refresh periodically.
+		// Плюс отдельный, более частый повод — сменившаяся строка показаний (SetSlotStatus):
+		// ждать общего keep-alive (секунда) для живой скорости бессмысленно.
 		const MenuDef *def = Find(pm.handle);
-		if (def && def->type != MenuType::Chat && curtime >= pm.nextHtmlRender)
+		const bool statusDue = pm.statusDirty && curtime >= pm.statusReadyAt;
+		if (def && def->type != MenuType::Chat && (curtime >= pm.nextHtmlRender || statusDue))
 		{
 			RenderHtml(i);
 		}
@@ -1484,6 +1501,31 @@ void MenuManager::OnPlayerDisconnect(int slot)
 	EndDisplay(slot, MenuEndReason::Disconnect);
 	// Drop busy state so a reconnecting client on this slot starts clean.
 	m_players[slot].externalBusy = false;
+	// EndDisplay чистит статус только при ОТКРЫТОМ показе; на слоте без меню он мог остаться от
+	// потребителя, писавшего его вперёд открытия — реконнект обязан начать с чистого листа.
+	m_players[slot].status.clear();
+	m_players[slot].statusDirty = false;
+}
+
+void MenuManager::SetSlotStatus(int slot, const char *text)
+{
+	ScopedLock lock(m_mutex);
+	if (slot < 0 || slot > MAXPLAYERS)
+	{
+		return;
+	}
+	PlayerMenu &pm = m_players[slot];
+	const char *next = text ? text : "";
+	if (pm.status == next)
+	{
+		// Зовётся с игрового такта — самый частый случай «текст тот же» обязан быть бесплатным.
+		return;
+	}
+	pm.status = next;
+	// Саму перерисовку не запускаем: панель перерисует Tick, когда истечёт kHtmlStatusInterval.
+	// Иначе один потребитель, пишущий статус каждый тик, гнал бы полную разметку меню 128 раз в
+	// секунду — а RenderHtml зовётся и из-под чужих мутаций (SetItemText), т.е. рекурсивно.
+	pm.statusDirty = true;
 }
 
 void MenuManager::SetExternalBusy(int slot, bool busy)
@@ -1526,6 +1568,10 @@ void MenuManager::Shutdown()
 	{
 		m_players[i].active = false;
 		m_players[i].handle = kInvalidMenuHandle;
+		// Выгрузка/перезагрузка плагина: статус пришёл от потребителя, который сейчас тоже
+		// выгружается — оставленный текст всплыл бы в первом же меню после hot-reload.
+		m_players[i].status.clear();
+		m_players[i].statusDirty = false;
 	}
 	m_menus.clear();
 }
@@ -1700,6 +1746,11 @@ void MenuManager::RenderHtml(int slot)
 	}
 
 	pm.nextHtmlRender = m_curtime + kHtmlRefreshInterval;
+	// Строку показаний считаем отданной ЗДЕСЬ, а не только при её собственном поводе: любая
+	// перерисовка (нажатие клавиши, SetItemText) уносит актуальный статус, и следующий его
+	// пересчёт должен ждать полный интервал, а не срабатывать сразу.
+	pm.statusDirty = false;
+	pm.statusReadyAt = m_curtime + kHtmlStatusInterval;
 
 	const auto &items = def->items;
 	int itemCount = static_cast<int>(items.size());
@@ -1810,7 +1861,16 @@ void MenuManager::RenderHtml(int slot)
 	// налезает на текст. Заголовок крупнее (fontSize-m), переносится раньше → уже wrap-порог.
 	int titleLines = WrappedLines(titleVisible, (std::max)(1, kHtmlWrapChars * 3 / 4));
 	int footerLines = WrappedLines(VisibleWidth(footer), kHtmlWrapChars);
-	int itemBudget = kHtmlPanelLineBudget - titleLines - footerLines;
+	// Строка показаний (005) занимает место наравне с футером. Если после заголовка и футера
+	// на пункты осталась бы меньше строки — статус не рисуем ВОВСЕ: обрезанная снизу строка
+	// показаний хуже, чем её отсутствие, а меню без единого пункта бесполезно.
+	int statusLines = pm.status.empty() ? 0 : WrappedLines(VisibleWidth(pm.status), kHtmlWrapChars);
+	const bool showStatus = statusLines > 0 && kHtmlPanelLineBudget - titleLines - footerLines - statusLines >= 1;
+	if (!showStatus)
+	{
+		statusLines = 0;
+	}
+	int itemBudget = kHtmlPanelLineBudget - titleLines - footerLines - statusLines;
 	if (itemBudget < 1)
 	{
 		itemBudget = 1; // хотя бы строку курсора показываем всегда
@@ -1927,6 +1987,15 @@ void MenuManager::RenderHtml(int slot)
 	html += "' class='fontSize-sm'>";
 	html += footer;
 	html += "</font>";
+
+	// 005: строка показаний — САМАЯ нижняя строка панели, под футером. Ниже неё в этом канале
+	// места нет, и это единственное место «под меню», доступное серверу вообще (см. ics2menus.h).
+	// Через ColorizeChat, как текст пунктов: разметку потребителя не пускаем, цвет — чат-байтами.
+	if (showStatus)
+	{
+		html += "<br>";
+		html += center_html::ColorizeChat(pm.status, "#FFFFFF", "fontSize-sm");
+	}
 
 	// Skip the network send when nothing changed, except a periodic keep-alive so the
 	// decaying panel doesn't blink. Saves bandwidth with many viewers idling on a menu.

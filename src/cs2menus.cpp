@@ -354,6 +354,11 @@ class CS2MenusAPI : public ICS2Menus
 	{
 		return g_MenuManager.GetExternalBusy(slot);
 	}
+
+	void SetSlotStatus(int slot, const char *text) override
+	{
+		g_MenuManager.SetSlotStatus(slot, text);
+	}
 };
 
 static CS2MenusAPI g_CS2MenusAPI;
@@ -367,7 +372,11 @@ ICS2Menus *Cs2Menus_GetLocalAPI()
 
 void *CS2MenusPlugin::OnMetamodQuery(const char *iface, int *ret)
 {
-	if (!strcmp(iface, CS2MENUS_INTERFACE))
+	// Отвечаем и на предыдущую ревизию: методы 005 дописаны в ХВОСТ vtable, её префикс для
+	// потребителя 004 не изменился, а он новых методов не знает и не зовёт. Без этой ветки
+	// апдейт cs2menus молча обнулял бы g_pMenus у любого плагина, собранного против 004, —
+	// то есть убивал бы все его меню разом.
+	if (!strcmp(iface, CS2MENUS_INTERFACE) || !strcmp(iface, CS2MENUS_INTERFACE_004))
 	{
 		if (ret)
 		{
