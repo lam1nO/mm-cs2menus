@@ -124,11 +124,20 @@ static constexpr int kHtmlAdjustArrowsWidth = 4;
 // Прежнее значение 28 было прикидкой и занижало окно пунктов на строку почти в каждом меню.
 static constexpr int kHtmlPanelLineBudget = 9;
 static constexpr int kHtmlWrapChars = 35;
-// Как часто панель разрешено перерисовывать из-за смены строки показаний (SetSlotStatus).
-// Её пишет игровой такт (128/с), а перерисовка — это отправка ВСЕЙ разметки меню; 10 Гц
-// глазу неотличимы от такта, а трафик держат в разумных рамках. Троттлинг живёт здесь, а не
+// Минимальный интервал между перерисовками панели из-за смены строки показаний
+// (SetSlotStatus); настраивается ключом HtmlStatusInterval, деф. 0 = «на каждой смене».
+//
+// Прежнее значение 0.1 давало НЕ 10 Гц: тик CS2 = 1/64, и первый тик после t+0.1 наступал
+// через 7 тиков = 0.109375 с (9.14 Гц), а показания с сотыми долями секунды прирастали за шаг
+// на 10.9375 сотых — то есть последняя цифра шла неравномерно (…11, 11, 10, 11…). Отсюда
+// «циферки меняются рывками» в репорте: и редко, и с неровным шагом.
+// Ноль убирает оба эффекта: перерисовка идёт из Tick, то есть не чаще кадра, и совпадает по
+// частоте с обычным худом (он шлёт свою панель тем же событием каждый тик и без дедупа).
+// Осмысленны только значения, кратные тику: интервал округляется вверх до ближайшего.
+// Верхняя граница троттла — секунда: дальше панель и так перерисуется периодическим
+// kHtmlRefreshInterval, и значение перестаёт что-либо значить. Троттлинг живёт здесь, а не
 // у потребителя: движок не может полагаться на то, что вызывающий себя ограничит.
-static constexpr float kHtmlStatusInterval = 0.1f;
+static constexpr float kHtmlStatusIntervalMax = 1.0f;
 
 // Cap on nested menu callbacks, so a consumer that re-displays a menu inside its
 // own onSelect/onEnd can't recurse the server into a stack overflow.
@@ -703,11 +712,19 @@ const char *MenuManager::DefaultLabelKey(MenuLabel label)
 	}
 }
 
+std::string MenuManager::SlotLanguage(int slot) const
+{
+	return m_langResolver ? m_langResolver(slot) : std::string();
+}
+
+std::string MenuManager::ResolveLabelLang(const std::string &lang, const MenuDef &def, MenuLabel label) const
+{
+	return g_Translations.Translate(lang, def.labels[static_cast<int>(label)]);
+}
+
 std::string MenuManager::ResolveLabel(int slot, const MenuDef &def, MenuLabel label) const
 {
-	const std::string &key = def.labels[static_cast<int>(label)];
-	std::string lang = m_langResolver ? m_langResolver(slot) : std::string();
-	return g_Translations.Translate(lang, key);
+	return ResolveLabelLang(SlotLanguage(slot), def, label);
 }
 
 bool MenuManager::DisplayMenu(MenuHandle menu, int slot, float duration, float curtime)
@@ -1489,6 +1506,23 @@ void MenuManager::Tick(float curtime)
 		{
 			continue;
 		}
+		// curtime стартует заново на смене карты, а все наши штампы абсолютные: пережившее
+		// смену меню получало «расписание из будущего» и замирало на длительность прошлой
+		// карты — и панель (угасла бы через kHtmlDurationSecs), и строка показаний. Время
+		// пошло назад — считаем всё просроченным. Тот же приём, что у потребителя строки
+		// показаний (cs2kz, KZHUDService::UpdateBottomPanel).
+		if (curtime < pm.lastHtmlSend)
+		{
+			pm.lastHtmlSend = 0.0f;
+			pm.nextHtmlRender = 0.0f;
+			pm.statusReadyAt = 0.0f;
+			if (pm.expireTime > 0.0f)
+			{
+				// Показ с таймаутом иначе не истёк бы никогда: закрываем, как по таймауту.
+				EndDisplay(i, MenuEndReason::Timeout);
+				continue;
+			}
+		}
 		if (pm.expireTime > 0.0f && curtime >= pm.expireTime)
 		{
 			EndDisplay(i, MenuEndReason::Timeout);
@@ -1496,7 +1530,9 @@ void MenuManager::Tick(float curtime)
 		}
 		// HTML messages decay, refresh periodically.
 		// Плюс отдельный, более частый повод — сменившаяся строка показаний (SetSlotStatus):
-		// ждать общего keep-alive (секунда) для живой скорости бессмысленно.
+		// ждать общего keep-alive (секунда) для живой скорости бессмысленно. Здесь же потолок
+		// её частоты: Tick идёт раз в кадр, поэтому статус не может перерисовать панель чаще
+		// такта, сколько бы раз потребитель ни позвал SetSlotStatus.
 		const MenuDef *def = Find(pm.handle);
 		const bool statusDue = pm.statusDirty && curtime >= pm.statusReadyAt;
 		if (def && def->type != MenuType::Chat && (curtime >= pm.nextHtmlRender || statusDue))
@@ -1537,9 +1573,9 @@ void MenuManager::SetSlotStatus(int slot, const char *text)
 		return;
 	}
 	pm.status = next;
-	// Саму перерисовку не запускаем: панель перерисует Tick, когда истечёт kHtmlStatusInterval.
-	// Иначе один потребитель, пишущий статус каждый тик, гнал бы полную разметку меню 128 раз в
-	// секунду — а RenderHtml зовётся и из-под чужих мутаций (SetItemText), т.е. рекурсивно.
+	// Саму перерисовку не запускаем — только помечаем: панель перерисует Tick. Это и есть
+	// потолок частоты (кадр), и он же снимает рекурсию — RenderHtml зовётся из-под чужих
+	// мутаций (SetItemText), а потребитель статуса может писать его из любого места такта.
 	pm.statusDirty = true;
 }
 
@@ -1598,6 +1634,7 @@ void MenuManager::Configure(const MenuManagerSettings &settings)
 
 	m_itemsPerPage = (std::max)(1, (std::min)(settings.itemsPerPage, MENU_MAX_ITEMS_PER_PAGE));
 	m_htmlVisibleItems = (std::max)(1, (std::min)(settings.htmlVisibleItems, MENU_MAX_HTML_VISIBLE));
+	m_htmlStatusInterval = (std::max)(0.0f, (std::min)(settings.htmlStatusInterval, kHtmlStatusIntervalMax));
 
 	// MenuType::Default would be circular, treat it (and unknown) as Chat.
 	if (m_settings.defaultType == MenuType::Default)
@@ -1765,7 +1802,10 @@ void MenuManager::RenderHtml(int slot)
 	// перерисовка (нажатие клавиши, SetItemText) уносит актуальный статус, и следующий его
 	// пересчёт должен ждать полный интервал, а не срабатывать сразу.
 	pm.statusDirty = false;
-	pm.statusReadyAt = m_curtime + kHtmlStatusInterval;
+	pm.statusReadyAt = m_curtime + m_htmlStatusInterval;
+
+	// Язык слота — один раз на проход: подписей до шести, а проход идёт каждый кадр.
+	const std::string lang = SlotLanguage(slot);
 
 	const auto &items = def->items;
 	int itemCount = static_cast<int>(items.size());
@@ -1831,7 +1871,7 @@ void MenuManager::RenderHtml(int slot)
 	// keys не эскейпим: это имена клавиш из конфига (W, F, A/D…), без HTML-спецсимволов —
 	// как и в прежнем коде. Эскейпится только переводимая подпись.
 	auto hint = [&](MenuLabel label, const std::string &keys)
-	{ return keys + " " + center_html::Escape(ResolveLabel(slot, *def, label)); };
+	{ return keys + " " + center_html::Escape(ResolveLabelLang(lang, *def, label)); };
 
 	if (upOn && downOn)
 	{
@@ -1941,7 +1981,7 @@ void MenuManager::RenderHtml(int slot)
 		// The inline Exit row sits at index == itemCount (after the real items).
 		if (i >= itemCount)
 		{
-			if (selected)
+			if (selected && kHtmlMarker[0])
 			{
 				html += "<font color='";
 				html += m_settings.navColor;
@@ -1952,14 +1992,17 @@ void MenuManager::RenderHtml(int slot)
 			html += "<font color='";
 			html += selected ? m_settings.navColor : m_settings.footerColor;
 			html += "' class='fontSize-sm'>";
-			html += center_html::Escape(ResolveLabel(slot, *def, MenuLabel::Exit));
+			html += center_html::Escape(ResolveLabelLang(lang, *def, MenuLabel::Exit));
 			html += "</font><br>";
 			continue;
 		}
 
 		const MenuItem &item = items[i];
 
-		if (selected)
+		// Пустой kHtmlMarker (наш минималистичный стиль — курсор обозначается только цветом
+		// строки) давал пустой <font …></font> — 46 мёртвых байт в каждой панели. Раньше это
+		// была мелочь, теперь панель уходит каждый тик.
+		if (selected && kHtmlMarker[0])
 		{
 			html += "<font color='";
 			html += m_settings.navColor;

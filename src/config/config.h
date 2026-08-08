@@ -38,6 +38,12 @@ struct MenuDefaultsCfg
 	std::string htmlFooterColor = "#909090";   // key-hint footer
 	std::string htmlDisabledColor = "#808080"; // greyed-out items
 
+	// Минимальный интервал (сек) между перерисовками панели из-за смены строки показаний
+	// (SetSlotStatus, интерфейс 005). 0 — на каждой смене, т.е. с частотой игрового такта:
+	// именно так рисуется обычный худ, и только так цифры в строке идут плавно.
+	// Поднимать только ради трафика; клампится в MenuManager::Configure.
+	float htmlStatusInterval = 0.0f;
+
 	// Workaround for the center-HTML (show_survival_respawn_status) panel flashing:
 	// fake CCSGameRules::m_bGameRestart while an HTML menu is shown.
 	// NOTE: this breaks warmup UI while a menu is open, so it's off by default.

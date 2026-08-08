@@ -535,6 +535,7 @@ static void LoadAndApplyConfig()
 	settings.defaultExitButton = g_MenusConfig.menu.exitButton;
 	settings.htmlVisibleItems = g_MenusConfig.menu.htmlVisibleItems;
 	settings.defaultExitItem = g_MenusConfig.menu.htmlExitItem;
+	settings.htmlStatusInterval = g_MenusConfig.menu.htmlStatusInterval;
 	if (IsValidHexColor(g_MenusConfig.menu.htmlNavColor))
 	{
 		settings.navColor = g_MenusConfig.menu.htmlNavColor;

@@ -58,6 +58,11 @@ struct MenuManagerSettings
 	std::string navColor = "#ff2ee7";
 	std::string footerColor = "#909090";
 	std::string disabledColor = "#808080";
+	// HTML: минимальный интервал (сек) между перерисовками панели из-за смены строки
+	// показаний (SetSlotStatus). 0 — перерисовывать на каждой смене, т.е. с частотой
+	// игрового такта: столько же, сколько стоит обычный худ, который шлёт свою панель тем же
+	// событием каждый тик. Поднимать только ради трафика (см. kHtmlStatusIntervalMax).
+	float htmlStatusInterval = 0.0f;
 };
 
 // Backing store for the public ICS2Menus API. Holds menus by handle plus
@@ -244,7 +249,8 @@ private:
 		// хэндл общий на всех зрителей, а показания у каждого свои.
 		std::string status;
 		// Статус меняется на игровом такте, а перерисовка панели — это сетевая отправка всей
-		// разметки меню. Копим изменение и отдаём его не чаще kHtmlStatusInterval.
+		// разметки меню. Копим изменение и отдаём его из Tick, не чаще htmlStatusInterval
+		// (деф. 0 — на каждой смене, т.е. с частотой кадра).
 		bool statusDirty = false;
 		float statusReadyAt = 0.0f;
 	};
@@ -308,6 +314,12 @@ private:
 	// Translate this menu's label for the player viewing in `slot`.
 	// Resolves the viewer's language, then looks the per-menu key up in the phrase table.
 	std::string ResolveLabel(int slot, const MenuDef &def, MenuLabel label) const;
+	// То же с УЖЕ разрешённым языком слота. RenderHtml переводит до шести подписей за проход,
+	// а сам проход теперь идёт каждый кадр (строка показаний) — резолвить язык на каждую
+	// подпись значило бы шесть лишних ToLower+аллокаций на кадр на зрителя.
+	std::string ResolveLabelLang(const std::string &lang, const MenuDef &def, MenuLabel label) const;
+	// Язык слота для переводов (пустая строка = язык по умолчанию).
+	std::string SlotLanguage(int slot) const;
 
 	// HTML: whether to render the selectable "Exit" row (after the last item).
 	// Shown when the menu is exitable and either the toggle is on or the Back key
@@ -333,6 +345,9 @@ private:
 	// Effective clamped copies of the size settings.
 	int m_itemsPerPage = MENU_MAX_ITEMS_PER_PAGE;
 	int m_htmlVisibleItems = MENU_MAX_HTML_VISIBLE;
+	// Клампнутый htmlStatusInterval (0..kHtmlStatusIntervalMax). Недоверенное значение из
+	// конфига могло прийти отрицательным или в минутах.
+	float m_htmlStatusInterval = 0.0f;
 	// HTML rendering+input usable (see SetHtmlAvailable). Off until proven.
 	bool m_htmlAvailable = false;
 	// Guards against unbounded reentrancy when a consumer callback re-enters API.

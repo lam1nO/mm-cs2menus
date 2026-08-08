@@ -16,6 +16,38 @@ static std::string ToLower(const std::string &s)
 	return r;
 }
 
+// Неотрицательные секунды с дробной частью. Разбор ручной, БЕЗ atof/strtod: те смотрят на
+// LC_NUMERIC, и на сервере с запятой-разделителем "0.05" молча стало бы нулём — то есть ровно
+// тем режимом, ради ухода от которого этот ключ и трогают. Принимаем оба разделителя.
+// Мусор/минус/пустое = 0 (дефолт), верхнюю границу держит кламп в MenuManager::Configure.
+static float ParseSeconds(const std::string &s)
+{
+	size_t i = 0;
+	while (i < s.size() && (s[i] == ' ' || s[i] == '\t'))
+	{
+		i++;
+	}
+	double value = 0.0;
+	bool any = false;
+	for (; i < s.size() && s[i] >= '0' && s[i] <= '9'; i++)
+	{
+		value = value * 10.0 + (s[i] - '0');
+		any = true;
+	}
+	if (i < s.size() && (s[i] == '.' || s[i] == ','))
+	{
+		i++;
+		double scale = 0.1;
+		for (; i < s.size() && s[i] >= '0' && s[i] <= '9'; i++)
+		{
+			value += (s[i] - '0') * scale;
+			scale *= 0.1;
+			any = true;
+		}
+	}
+	return any ? static_cast<float>(value) : 0.0f;
+}
+
 static void ConfigHandler(const std::string &section, const std::string &key, const std::string &value, void *userdata)
 {
 	MenusConfig *cfg = static_cast<MenusConfig *>(userdata);
@@ -70,6 +102,10 @@ static void ConfigHandler(const std::string &section, const std::string &key, co
 		else if (k == "htmldisabledcolor")
 		{
 			cfg->menu.htmlDisabledColor = value;
+		}
+		else if (k == "htmlstatusinterval")
+		{
+			cfg->menu.htmlStatusInterval = ParseSeconds(value);
 		}
 		else if (k == "htmlfixflashing")
 		{
