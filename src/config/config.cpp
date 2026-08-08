@@ -1,5 +1,8 @@
 #include "config.h"
 #include "kv_parser.h"
+// src/common.h — ради META_CONPRINTF (он из ISmmPlugin.h); тем же путём его берёт
+// src/entity/schema.cpp.
+#include "src/common.h"
 
 #include <algorithm>
 #include <cctype>
@@ -45,7 +48,19 @@ static float ParseSeconds(const std::string &s)
 			any = true;
 		}
 	}
-	return any ? static_cast<float>(value) : 0.0f;
+	// Хвост после числа — почти всегда опечатка в ключе («0.5s», «+0.5», «1e-2»), и молчать
+	// тут нельзя: значение применится не то, о котором думал оператор, а трогают этот ключ
+	// ровно на инциденте. Разобранное печатаем, чтобы расхождение было видно сразу.
+	while (i < s.size() && (s[i] == ' ' || s[i] == '\t'))
+	{
+		i++;
+	}
+	const float parsed = any ? static_cast<float>(value) : 0.0f;
+	if (i < s.size() || !any)
+	{
+		META_CONPRINTF("[cs2menus] WARNING: не разобрано значение \"%s\", применено %.5f\n", s.c_str(), parsed);
+	}
+	return parsed;
 }
 
 static void ConfigHandler(const std::string &section, const std::string &key, const std::string &value, void *userdata)
