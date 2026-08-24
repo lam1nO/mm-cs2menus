@@ -37,6 +37,8 @@ struct MenuDefaultsCfg
 	std::string htmlNavColor = "#ff2ee7";      // cursor row + marker
 	std::string htmlFooterColor = "#909090";   // key-hint footer
 	std::string htmlDisabledColor = "#808080"; // greyed-out items
+	// 006: захваченная adjustable-строка (E-захват). Янтарный против розового курсора.
+	std::string htmlCaptureColor = "#f5c211";
 
 	// Минимальный интервал (сек) между перерисовками панели из-за смены строки показаний
 	// (SetSlotStatus, интерфейс 005). 0 — на каждой смене, т.е. с частотой игрового такта:

@@ -42,4 +42,9 @@
 		"en"	"Adjust"
 		"ru"	"Настр."
 	}
+	"Capture"
+	{
+		"en"	"Tune"
+		"ru"	"Настроить"
+	}
 }

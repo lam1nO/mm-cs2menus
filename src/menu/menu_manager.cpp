@@ -373,6 +373,45 @@ void MenuManager::SetAdjustCallback(MenuHandle menu, MenuItemAdjustFn onAdjust)
 	}
 }
 
+void MenuManager::SetAdjustCapture(MenuHandle menu, bool enabled)
+{
+	ScopedLock lock(m_mutex);
+	MenuDef *def = Find(menu);
+	if (!def || def->adjustCapture == enabled)
+	{
+		return;
+	}
+	def->adjustCapture = enabled;
+	// Выключение снимает живые захваты; и в обе стороны меняется рендер adjustable-строк
+	// (стрелки постоянные <-> только у захваченной), так что зрители перерисовываются.
+	for (int slot = 0; slot <= MAXPLAYERS; slot++)
+	{
+		PlayerMenu &pm = m_players[slot];
+		if (pm.active && pm.handle == menu && !enabled)
+		{
+			pm.captureItem = -1;
+		}
+	}
+	RefreshMenu(menu);
+}
+
+// 006: захват валиден, только пока меню в режиме захвата и строка всё ещё регулируемая и живая.
+// Иначе индекс протухает (строку удалили/посерили под открытым меню) и чистится на месте.
+int MenuManager::EffectiveCaptureItem(const MenuDef &def, PlayerMenu &pm) const
+{
+	if (pm.captureItem < 0)
+	{
+		return -1;
+	}
+	if (!def.adjustCapture || pm.captureItem >= static_cast<int>(def.items.size()) || !def.items[pm.captureItem].adjustable
+		|| def.items[pm.captureItem].disabled)
+	{
+		pm.captureItem = -1;
+		return -1;
+	}
+	return pm.captureItem;
+}
+
 int MenuManager::AddSubMenu(MenuHandle parent, const char *text, MenuHandle child, const char *info)
 {
 	ScopedLock lock(m_mutex);
@@ -546,6 +585,7 @@ void MenuManager::RemoveItem(MenuHandle menu, int item)
 		if (pm.active && pm.handle == menu)
 		{
 			pm.lastAdjustDir = 0;
+			pm.captureItem = -1; // 006: индексы сдвинулись — захват мог указать на чужую строку
 		}
 	}
 	RefreshMenu(menu); // RenderHtml/RenderPage clamp any now-stale cursor/page
@@ -568,6 +608,7 @@ void MenuManager::RemoveAllItems(MenuHandle menu)
 		{
 			pm.cursor = 0;
 			pm.lastAdjustDir = 0; // 004: пункты сброшены — сбрасываем подсветку стрелки
+			pm.captureItem = -1;  // 006: захватывать больше нечего
 			pm.page = 0;
 		}
 	}
@@ -706,6 +747,8 @@ const char *MenuManager::DefaultLabelKey(MenuLabel label)
 			return "Back";
 		case MenuLabel::Adjust:
 			return "Adjust";
+		case MenuLabel::Capture:
+			return "Capture";
 		case MenuLabel::Exit:
 		default:
 			return "Exit";
@@ -784,6 +827,7 @@ bool MenuManager::DisplayLocked(MenuHandle menu, int slot, float duration)
 	// Open on the configured start item (clamped at render time).
 	pm.cursor = def->startItem;
 	pm.lastAdjustDir = 0; // 004: свежее состояние регулировки
+	pm.captureItem = -1;  // 006: захват не переживает смену показа
 	pm.page = (m_itemsPerPage > 0) ? def->startItem / m_itemsPerPage : 0;
 	pm.expireTime = (duration > 0.0f) ? (m_curtime + duration) : 0.0f;
 	pm.prevButtons = 0;
@@ -887,6 +931,7 @@ void MenuManager::DestroyMenu(MenuHandle menu)
 		}
 		pm.active = false;
 		pm.handle = kInvalidMenuHandle;
+		pm.captureItem = -1; // 006
 
 		if (onMain)
 		{
@@ -951,6 +996,7 @@ void MenuManager::EndDisplay(int slot, MenuEndReason reason)
 	MenuHandle handle = pm.handle;
 	pm.active = false;
 	pm.handle = kInvalidMenuHandle;
+	pm.captureItem = -1; // 006: захват умирает вместе с показом
 	// Статус принадлежит закрывшемуся показу: следующее меню на этом слоте не должно унаследовать
 	// чужие показания, а потребитель может и не узнать о закрытии (таймаут, дисконнект, Cancel).
 	pm.status.clear();
@@ -1074,6 +1120,7 @@ void MenuManager::SwitchMenu(int slot, MenuHandle handle)
 	pm.handle = handle;
 	pm.cursor = newDef->startItem;
 	pm.lastAdjustDir = 0; // 004: другое меню — сбрасываем подсветку стрелки
+	pm.captureItem = -1;  // 006: захват принадлежит прежнему меню
 	pm.page = (m_itemsPerPage > 0) ? newDef->startItem / m_itemsPerPage : 0;
 	// Re-baseline buttons so the key that triggered the switch doesn't act again in the new menu.
 	pm.prevButtons = 0;
@@ -1255,6 +1302,10 @@ void MenuManager::PollButtons(int slot, uint64_t heldButtons, float curtime)
 	// они проваливаются в разбор ниже (в дефолтной раскладке D=Select), т.е. игнорируются как
 	// прежде в нашей раскладке (Select=E, A/D ничему не назначены).
 	bool onAdjustable = (pm.cursor >= 0 && pm.cursor < static_cast<int>(def->items.size()) && def->items[pm.cursor].adjustable);
+	// 006: в capture-меню A/D действуют только на ЗАХВАЧЕННОЙ строке — без захвата случайные
+	// A/D в полёте не должны крутить значение. W/S в захвате глушит сам HtmlMoveCursor,
+	// переключение захвата по E живёт в HtmlNavSelect (обе точки общие с CommandNav).
+	bool adjustKeysLive = def->adjustCapture ? (EffectiveCaptureItem(*def, pm) >= 0) : onAdjustable;
 
 	if (newly & EffectiveNavMask(*def, MenuNavAction::Up))
 	{
@@ -1264,11 +1315,11 @@ void MenuManager::PollButtons(int slot, uint64_t heldButtons, float curtime)
 	{
 		HtmlMoveCursor(slot, +1);
 	}
-	else if (onAdjustable && (newly & EffectiveNavMask(*def, MenuNavAction::AdjustDec)))
+	else if (adjustKeysLive && (newly & EffectiveNavMask(*def, MenuNavAction::AdjustDec)))
 	{
 		HtmlAdjust(slot, -1);
 	}
-	else if (onAdjustable && (newly & EffectiveNavMask(*def, MenuNavAction::AdjustInc)))
+	else if (adjustKeysLive && (newly & EffectiveNavMask(*def, MenuNavAction::AdjustInc)))
 	{
 		HtmlAdjust(slot, +1);
 	}
@@ -1334,6 +1385,19 @@ void MenuManager::HtmlNavSelect(int slot)
 	if (!def)
 	{
 		return;
+	}
+	// 006: в capture-меню E на живой adjustable-строке — переключатель захвата, а не выбор.
+	// onSelect такой строки в capture-меню не зовётся никогда (контракт SetAdjustCapture).
+	if (def->adjustCapture && pm.cursor >= 0 && pm.cursor < static_cast<int>(def->items.size()))
+	{
+		const MenuItem &item = def->items[pm.cursor];
+		if (item.adjustable && !item.disabled)
+		{
+			pm.captureItem = (pm.captureItem == pm.cursor) ? -1 : pm.cursor;
+			pm.lastAdjustDir = 0;
+			RenderHtml(slot);
+			return;
+		}
 	}
 	// Selecting the inline Exit row closes the menu, otherwise pick the cursor item.
 	if (HtmlShowsExitRow(*def) && pm.cursor == static_cast<int>(def->items.size()))
@@ -1462,6 +1526,12 @@ void MenuManager::HtmlMoveCursor(int slot, int delta)
 	PlayerMenu &pm = m_players[slot];
 	const MenuDef *def = Find(pm.handle);
 	if (!def)
+	{
+		return;
+	}
+	// 006: в захвате курсор заморожен — W/S не должны сбивать настраиваемую строку
+	// (ровно та жалоба, ради которой захват и заведён: полёт на WASD листал меню).
+	if (EffectiveCaptureItem(*def, pm) >= 0)
 	{
 		return;
 	}
@@ -1825,6 +1895,11 @@ void MenuManager::RenderHtml(int slot)
 		pm.cursor = count - 1;
 	}
 
+	// 006: захваченная строка (или -1). В capture-меню стрелки ◄ ► рисуются только у неё,
+	// у остальных adjustable-строк — вид обычного пункта; вне режима захвата всё как в 004.
+	const int captureItem = EffectiveCaptureItem(*def, pm);
+	const bool capturedNow = captureItem >= 0;
+
 	std::string html;
 	html.reserve(512);
 
@@ -1850,8 +1925,13 @@ void MenuManager::RenderHtml(int slot)
 	bool exitOn = def->exitButton && EffectiveExitMask(*def, slot) != 0;
 	// 004: подсказка «менять» — только когда подсвечена adjustable-строка и обе A/D заданы.
 	bool onAdjustableRow = pm.cursor >= 0 && pm.cursor < itemCount && items[pm.cursor].adjustable;
-	bool adjustOn = onAdjustableRow && EffectiveNavMask(*def, MenuNavAction::AdjustDec) != 0
+	// 006: в capture-меню A/D живут только в захвате — и подсказка тоже.
+	bool adjustOn = (def->adjustCapture ? capturedNow : onAdjustableRow) && EffectiveNavMask(*def, MenuNavAction::AdjustDec) != 0
 					&& EffectiveNavMask(*def, MenuNavAction::AdjustInc) != 0;
+	// 006: на живой adjustable-строке capture-меню клавиша Select означает захват/отпуск —
+	// подсказка Capture вместо Select, чтобы футер не врал про действие кнопки.
+	bool captureHintOn = def->adjustCapture && onAdjustableRow && !items[pm.cursor].disabled
+						 && EffectiveNavMask(*def, MenuNavAction::Select) != 0;
 
 	std::string footer;
 	// Разделитель — узкий средний пункт (&#183; = ·) с пробелами; легче и уже, чем « | ».
@@ -1877,7 +1957,11 @@ void MenuManager::RenderHtml(int slot)
 	auto hint = [&](MenuLabel label, const std::string &keys)
 	{ return keys + " " + center_html::Escape(ResolveLabelLang(lang, *def, label)); };
 
-	if (upOn && downOn)
+	// 006: в захвате W/S заморожены — подсказку хода прячем, чтобы футер не обещал мёртвые клавиши.
+	if (capturedNow)
+	{
+	}
+	else if (upOn && downOn)
 	{
 		addSegment(hint(MenuLabel::Move, EffectiveNavLabel(*def, MenuNavAction::Up) + "/" + EffectiveNavLabel(*def, MenuNavAction::Down)));
 	}
@@ -1893,7 +1977,11 @@ void MenuManager::RenderHtml(int slot)
 	{
 		addSegment(hint(MenuLabel::Adjust, EffectiveNavLabel(*def, MenuNavAction::AdjustDec) + "/" + EffectiveNavLabel(*def, MenuNavAction::AdjustInc)));
 	}
-	if (selectOn)
+	if (captureHintOn)
+	{
+		addSegment(hint(MenuLabel::Capture, EffectiveNavLabel(*def, MenuNavAction::Select)));
+	}
+	else if (selectOn)
 	{
 		addSegment(hint(MenuLabel::Select, EffectiveNavLabel(*def, MenuNavAction::Select)));
 	}
@@ -1960,7 +2048,8 @@ void MenuManager::RenderHtml(int slot)
 			else
 			{
 				int w = VisibleWidth(items[i].text);
-				if (items[i].adjustable)
+				// 006: в capture-меню стрелки (и их ширина) — только у захваченной строки.
+				if (items[i].adjustable && (!def->adjustCapture || i == captureItem))
 				{
 					w += kHtmlAdjustArrowsWidth; // ◄ … ► добавляют ширину
 				}
@@ -2015,23 +2104,31 @@ void MenuManager::RenderHtml(int slot)
 			html += "</font>";
 		}
 
-		const char *base = item.disabled ? m_settings.disabledColor.c_str() : (selected ? m_settings.navColor.c_str() : "#FFFFFF");
+		// 006: захваченная строка целиком цветом захвата — состояние обязано читаться мгновенно
+		// и отличаться от обычной подсветки курсора (navColor).
+		const bool capturedRow = (i == captureItem);
+		const char *base = item.disabled  ? m_settings.disabledColor.c_str()
+						   : capturedRow ? m_settings.captureColor.c_str()
+						   : selected    ? m_settings.navColor.c_str()
+										 : "#FFFFFF";
 
-		if (item.adjustable)
+		// 004: значение в обрамлении стрелок ◄ ► — видно, что строку крутят A/D.
+		// 006: в capture-меню стрелки — индикатор ЗАХВАТА: появляются по E, исчезают при отпуске.
+		if (item.adjustable && (!def->adjustCapture || capturedRow))
 		{
-			// 004: значение в обрамлении стрелок ◄ ► — видно, что строку крутят A/D.
 			// Активная сторона (последнее нажатие на этой подсвеченной строке) — акцентом navColor,
-			// иначе стрелки приглушены footerColor (просто «регулируемо»).
+			// иначе стрелки приглушены: footerColor (просто «регулируемо») или цветом захвата.
 			bool leftActive = selected && pm.lastAdjustDir < 0;
 			bool rightActive = selected && pm.lastAdjustDir > 0;
+			const std::string &idleArrow = capturedRow ? m_settings.captureColor : m_settings.footerColor;
 			html += "<font color='";
-			html += leftActive ? m_settings.navColor : m_settings.footerColor;
+			html += leftActive ? m_settings.navColor : idleArrow;
 			html += "' class='fontSize-sm'>";
 			html += kHtmlAdjustLeftArrow;
 			html += " </font>";
 			html += center_html::ColorizeChat(item.text, base, "fontSize-sm");
 			html += "<font color='";
-			html += rightActive ? m_settings.navColor : m_settings.footerColor;
+			html += rightActive ? m_settings.navColor : idleArrow;
 			html += "' class='fontSize-sm'> ";
 			html += kHtmlAdjustRightArrow;
 			html += "</font>";

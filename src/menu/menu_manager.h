@@ -58,6 +58,9 @@ struct MenuManagerSettings
 	std::string navColor = "#ff2ee7";
 	std::string footerColor = "#909090";
 	std::string disabledColor = "#808080";
+	// 006: цвет захваченной adjustable-строки. Янтарный против розового курсора: захват должен
+	// читаться мгновенно и не путаться с обычной подсветкой.
+	std::string captureColor = "#f5c211";
 	// HTML: минимальный интервал (сек) между перерисовками панели из-за смены строки
 	// показаний (SetSlotStatus). 0 — перерисовывать на каждой смене, т.е. с частотой
 	// игрового такта: столько же, сколько стоит обычный худ, который шлёт свою панель тем же
@@ -75,6 +78,8 @@ public:
 	int AddItem(MenuHandle menu, const char *text, const char *info, bool disabled);
 	int AddAdjustableItem(MenuHandle menu, const char *text, const char *info, float step, float minValue, float maxValue);
 	void SetAdjustCallback(MenuHandle menu, MenuItemAdjustFn onAdjust);
+	// 006: режим захвата adjustable-строк для меню (см. ics2menus.h).
+	void SetAdjustCapture(MenuHandle menu, bool enabled);
 	int AddSubMenu(MenuHandle parent, const char *text, MenuHandle child, const char *info);
 	void SetTitle(MenuHandle menu, const char *title);
 	void SetExitButton(MenuHandle menu, bool enabled);
@@ -218,6 +223,8 @@ private:
 		bool closeOnSelect = true;
 		bool exitItem = false; // HTML: show a selectable "Exit" row in the list
 		int startItem = 0;     // item the menu opens on
+		// 006: E на adjustable-строке — захват (см. SetAdjustCapture). Off = поведение 004/005.
+		bool adjustCapture = false;
 		// Set when this menu is reached as a submenu, so Back returns to the parent.
 		MenuHandle parent = kInvalidMenuHandle;
 		// Indexed by MenuNavAction (Up..AdjustInc). mask 0 = inherit the server config binding.
@@ -235,6 +242,10 @@ private:
 		// 004: направление последней регулировки текущей adjustable-строки: -1 A, +1 D, 0 нет.
 		// Красит соответствующую стрелку ◄/► акцентом. Сбрасывается при смене курсора/меню.
 		int lastAdjustDir = 0;
+		// 006: абсолютный индекс захваченной adjustable-строки (-1 = захвата нет). Живёт только
+		// в capture-меню; сбрасывается при любой смене меню/строк и валидируется на каждый доступ
+		// (EffectiveCaptureItem) — строка могла исчезнуть или посереть под открытым меню.
+		int captureItem = -1;
 		float expireTime = 0.0f; // absolute game time, 0 = no expire
 		uint64_t prevButtons = 0;
 		bool buttonsPrimed = false;
@@ -281,6 +292,9 @@ private:
 	// Re-render every player currently viewing `menu` (after a live mutation).
 	// Defers to the next GameFrame if called off the main thread.
 	void RefreshMenu(MenuHandle menu);
+
+	// 006: индекс захваченной строки, если захват всё ещё валиден, иначе -1 (и чистит pm).
+	int EffectiveCaptureItem(const MenuDef &def, PlayerMenu &pm) const;
 
 	// html navigation
 	void HtmlMoveCursor(int slot, int delta);

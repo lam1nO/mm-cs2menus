@@ -359,6 +359,11 @@ class CS2MenusAPI : public ICS2Menus
 	{
 		g_MenuManager.SetSlotStatus(slot, text);
 	}
+
+	void SetAdjustCapture(MenuHandle menu, bool enabled) override
+	{
+		g_MenuManager.SetAdjustCapture(menu, enabled);
+	}
 };
 
 static CS2MenusAPI g_CS2MenusAPI;
@@ -372,11 +377,11 @@ ICS2Menus *Cs2Menus_GetLocalAPI()
 
 void *CS2MenusPlugin::OnMetamodQuery(const char *iface, int *ret)
 {
-	// Отвечаем и на предыдущую ревизию: методы 005 дописаны в ХВОСТ vtable, её префикс для
-	// потребителя 004 не изменился, а он новых методов не знает и не зовёт. Без этой ветки
-	// апдейт cs2menus молча обнулял бы g_pMenus у любого плагина, собранного против 004, —
-	// то есть убивал бы все его меню разом.
-	if (!strcmp(iface, CS2MENUS_INTERFACE) || !strcmp(iface, CS2MENUS_INTERFACE_004))
+	// Отвечаем и на предыдущие ревизии: новые методы дописаны в ХВОСТ vtable, префикс для
+	// потребителя 004/005 не изменился, а он новых методов не знает и не зовёт. Без этой ветки
+	// апдейт cs2menus молча обнулял бы g_pMenus у любого плагина, собранного против старой
+	// ревизии, — то есть убивал бы все его меню разом.
+	if (!strcmp(iface, CS2MENUS_INTERFACE) || !strcmp(iface, CS2MENUS_INTERFACE_005) || !strcmp(iface, CS2MENUS_INTERFACE_004))
 	{
 		if (ret)
 		{
@@ -547,6 +552,10 @@ static void LoadAndApplyConfig()
 	if (IsValidHexColor(g_MenusConfig.menu.htmlDisabledColor))
 	{
 		settings.disabledColor = g_MenusConfig.menu.htmlDisabledColor;
+	}
+	if (IsValidHexColor(g_MenusConfig.menu.htmlCaptureColor))
+	{
+		settings.captureColor = g_MenusConfig.menu.htmlCaptureColor;
 	}
 
 	// HTML nav keys. "none"/"off"/blank disables the action (mask 0),

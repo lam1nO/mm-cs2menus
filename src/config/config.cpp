@@ -118,6 +118,10 @@ static void ConfigHandler(const std::string &section, const std::string &key, co
 		{
 			cfg->menu.htmlDisabledColor = value;
 		}
+		else if (k == "htmlcapturecolor")
+		{
+			cfg->menu.htmlCaptureColor = value;
+		}
 		else if (k == "htmlstatusinterval")
 		{
 			cfg->menu.htmlStatusInterval = ParseSeconds(value);
