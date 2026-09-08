@@ -1,6 +1,9 @@
 FROM registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest AS build
 
-RUN apt-get update -y && \
+# Acquire::Check-Valid-Until=false: база steamrt sniper стоит на Debian bullseye, тот ушёл
+# в архив, и apt валит сборку на просроченном InRelease. Снимаем проверку СРОКА метаданных
+# только для этого вызова; подпись индекса по-прежнему проверяется.
+RUN apt-get -o Acquire::Check-Valid-Until=false update -y && \
     apt-get install -y --no-install-recommends \
         python3 \
         python3-pip \
