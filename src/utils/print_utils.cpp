@@ -18,7 +18,10 @@ static INetworkMessageInternal *GetTextMsgMsg()
 	static INetworkMessageInternal *s_pMsg = nullptr;
 	if (!s_pMsg && g_pNetworkMessages)
 	{
-		s_pMsg = g_pNetworkMessages->FindNetworkMessagePartial("TextMsg");
+		// Точное имя базового сообщения, не подстрока «TextMsg»: апдейт CS2 09.09.2026 переименовал
+		// CS-специфичные SayText/SayText2/TextMsg в *_CSGOLegacy, подстрока попадала в легаси,
+		// который клиент не рисует — чат-вывод меню пропал на всём флоте (инцидент 10.09).
+		s_pMsg = g_pNetworkMessages->FindNetworkMessage("CUserMessageTextMsg");
 	}
 	return s_pMsg;
 }
