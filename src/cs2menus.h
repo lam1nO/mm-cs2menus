@@ -19,10 +19,11 @@ public: // IMetamodListener
 					 bool background);
 	void OnLevelShutdown();
 
-public: // SourceHook hook handlers
+public: // обработчики хуков (KHook, Metamod API 18 — обёртки в cs2menus.cpp)
 	void Hook_GameFrame(bool simulating, bool bFirstTick, bool bLastTick);
 	void Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnectionReason reason, const char *pszName, uint64 xuid, const char *pszNetworkID);
-	void Hook_DispatchConCommand(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args);
+	// true — команда разобрана как навигация меню и движку её отдавать не надо (бывший MRES_SUPERCEDE).
+	bool Hook_DispatchConCommand(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args);
 
 public:
 	const char *GetAuthor()

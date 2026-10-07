@@ -24,10 +24,16 @@
 #include <networksystem/inetworkmessages.h>
 #include <schemasystem/schemasystem.h>
 
-SH_DECL_HOOK3_void(IServerGameDLL, GameFrame, SH_NOATTRIB, 0, bool, bool, bool);
-SH_DECL_HOOK5_void(IServerGameClients, ClientDisconnect, SH_NOATTRIB, 0, CPlayerSlot, ENetworkDisconnectionReason, const char *, uint64,
-				   const char *);
-SH_DECL_HOOK3_void(ICvar, DispatchConCommand, SH_NOATTRIB, 0, ConCommandRef, const CCommandContext &, const CCommand &);
+// KHook (Metamod API 18): SourceHook из metamod удалён. Хуки — статические объекты, обработчики
+// плагина зовутся из обёрток (g_ThisPlugin объявлен ниже, обёртки определены после него).
+static KHook::Return<void> GameFramePost(IServerGameDLL *pThis, bool simulating, bool bFirstTick, bool bLastTick);
+static KHook::Virtual<IServerGameDLL, void, bool, bool, bool> s_gameFrameHook(nullptr, GameFramePost);
+static KHook::Return<void> ClientDisconnectPost(IServerGameClients *pThis, CPlayerSlot slot, ENetworkDisconnectionReason reason, const char *pszName,
+												uint64 xuid, const char *pszNetworkID);
+static KHook::Virtual<IServerGameClients, void, CPlayerSlot, ENetworkDisconnectionReason, const char *, uint64, const char *>
+	s_clientDisconnectHook(nullptr, ClientDisconnectPost);
+static KHook::Return<void> DispatchConCommandPre(ICvar *pThis, ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args);
+static KHook::Virtual<ICvar, void, ConCommandRef, const CCommandContext &, const CCommand &> s_dispatchConCommandHook(DispatchConCommandPre, nullptr);
 
 IServerGameDLL *g_pServerGameDLL = nullptr;
 IServerGameClients *g_pGameClients = nullptr;
@@ -152,6 +158,24 @@ static void ApplyHudFlashingFix(float curtime)
 }
 
 CS2MenusPlugin g_ThisPlugin;
+
+static KHook::Return<void> GameFramePost(IServerGameDLL *, bool simulating, bool bFirstTick, bool bLastTick)
+{
+	g_ThisPlugin.Hook_GameFrame(simulating, bFirstTick, bLastTick);
+	return {KHook::Action::Ignore};
+}
+
+static KHook::Return<void> ClientDisconnectPost(IServerGameClients *, CPlayerSlot slot, ENetworkDisconnectionReason reason, const char *pszName,
+												uint64 xuid, const char *pszNetworkID)
+{
+	g_ThisPlugin.Hook_ClientDisconnect(slot, reason, pszName, xuid, pszNetworkID);
+	return {KHook::Action::Ignore};
+}
+
+static KHook::Return<void> DispatchConCommandPre(ICvar *, ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args)
+{
+	return {g_ThisPlugin.Hook_DispatchConCommand(cmd, ctx, args) ? KHook::Action::Supersede : KHook::Action::Ignore};
+}
 
 PLUGIN_EXPOSE(CS2MenusPlugin, g_ThisPlugin);
 
@@ -631,9 +655,12 @@ bool CS2MenusPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen
 
 	g_SMAPI->AddListener(this, this);
 
-	SH_ADD_HOOK(IServerGameDLL, GameFrame, g_pServerGameDLL, SH_MEMBER(this, &CS2MenusPlugin::Hook_GameFrame), true);
-	SH_ADD_HOOK(IServerGameClients, ClientDisconnect, g_pGameClients, SH_MEMBER(this, &CS2MenusPlugin::Hook_ClientDisconnect), true);
-	SH_ADD_HOOK(ICvar, DispatchConCommand, g_pICvar, SH_MEMBER(this, &CS2MenusPlugin::Hook_DispatchConCommand), false);
+	s_gameFrameHook.Configure(&IServerGameDLL::GameFrame);
+	s_gameFrameHook.Add(g_pServerGameDLL);
+	s_clientDisconnectHook.Configure(&IServerGameClients::ClientDisconnect);
+	s_clientDisconnectHook.Add(g_pGameClients);
+	s_dispatchConCommandHook.Configure(&ICvar::DispatchConCommand);
+	s_dispatchConCommandHook.Add(g_pICvar);
 
 	g_pCVar = g_pICvar;
 	META_CONVAR_REGISTER(FCVAR_RELEASE | FCVAR_CLIENT_CAN_EXECUTE | FCVAR_GAMEDLL);
@@ -682,9 +709,9 @@ void CS2MenusPlugin::OnLevelShutdown()
 
 bool CS2MenusPlugin::Unload(char *error, size_t maxlen)
 {
-	SH_REMOVE_HOOK(IServerGameDLL, GameFrame, g_pServerGameDLL, SH_MEMBER(this, &CS2MenusPlugin::Hook_GameFrame), true);
-	SH_REMOVE_HOOK(IServerGameClients, ClientDisconnect, g_pGameClients, SH_MEMBER(this, &CS2MenusPlugin::Hook_ClientDisconnect), true);
-	SH_REMOVE_HOOK(ICvar, DispatchConCommand, g_pICvar, SH_MEMBER(this, &CS2MenusPlugin::Hook_DispatchConCommand), false);
+	s_gameFrameHook.ClearHooks();
+	s_clientDisconnectHook.ClearHooks();
+	s_dispatchConCommandHook.ClearHooks();
 
 	// Drop all menus + displays without firing callbacks into consumer plugins.
 	g_MenuManager.Shutdown();
@@ -697,7 +724,7 @@ void CS2MenusPlugin::Hook_GameFrame(bool /*simulating*/, bool /*bFirstTick*/, bo
 	CGlobalVars *globals = GetGameGlobals();
 	if (!globals)
 	{
-		RETURN_META(MRES_IGNORED);
+		return;
 	}
 
 	float curtime = globals->curtime;
@@ -728,14 +755,12 @@ void CS2MenusPlugin::Hook_GameFrame(bool /*simulating*/, bool /*bFirstTick*/, bo
 
 	g_MenuManager.Tick(curtime);
 	ApplyHudFlashingFix(curtime);
-	RETURN_META(MRES_IGNORED);
 }
 
 void CS2MenusPlugin::Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnectionReason /*reason*/, const char * /*pszName*/, uint64 /*xuid*/,
 										   const char * /*pszNetworkID*/)
 {
 	g_MenuManager.OnPlayerDisconnect(slot.Get());
-	RETURN_META(MRES_IGNORED);
 }
 
 // Map a bare command body to a nav action. "menu_close"/"menu_exit" close the menu;
@@ -891,35 +916,35 @@ CON_COMMAND_F(mm_menu_back, "Step back to the parent menu (no-op at a root menu)
 	RunMenuNavCommand(context, MenuNavAction::Back);
 }
 
-void CS2MenusPlugin::Hook_DispatchConCommand(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args)
+bool CS2MenusPlugin::Hook_DispatchConCommand(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args)
 {
 	const char *cmdName = args.Arg(0);
 	if (!cmdName)
 	{
-		RETURN_META(MRES_IGNORED);
+		return false;
 	}
 
 	bool isSay = (strcmp(cmdName, "say") == 0 || strcmp(cmdName, "say_team") == 0);
 	if (!isSay)
 	{
-		RETURN_META(MRES_IGNORED);
+		return false;
 	}
 
 	int slot = ctx.GetPlayerSlot().Get();
 	if (slot < 0 || slot > MAXPLAYERS)
 	{
-		RETURN_META(MRES_IGNORED);
+		return false;
 	}
 
 	if (!g_MenuManager.HasMenu(slot))
 	{
-		RETURN_META(MRES_IGNORED);
+		return false;
 	}
 
 	const char *rawMsg = args.ArgS();
 	if (!rawMsg || !rawMsg[0])
 	{
-		RETURN_META(MRES_IGNORED);
+		return false;
 	}
 
 	// ProcessInput strips the outer quotes CS2 wraps around the say message.
@@ -941,14 +966,14 @@ void CS2MenusPlugin::Hook_DispatchConCommand(ConCommandRef cmd, const CCommandCo
 		{
 			g_MenuManager.CommandNav(slot, navAction, curtime);
 		}
-		RETURN_META(navSilent ? MRES_SUPERCEDE : MRES_IGNORED);
+		return navSilent;
 	}
 
 	if (g_MenuManager.ProcessInput(slot, rawMsg, curtime))
 	{
 		// Suppress the chat line so the number doesn't show.
-		RETURN_META(MRES_SUPERCEDE);
+		return true;
 	}
 
-	RETURN_META(MRES_IGNORED);
+	return false;
 }
