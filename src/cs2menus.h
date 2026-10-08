@@ -5,7 +5,6 @@
 #include <ISmmPlugin.h>
 #include <igameevents.h>
 #include <iserver.h>
-#include <sh_vector.h>
 
 class CS2MenusPlugin : public ISmmPlugin, public IMetamodListener
 {

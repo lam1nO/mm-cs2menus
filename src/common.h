@@ -4,7 +4,6 @@
 #include <ISmmPlugin.h>
 #include <igameevents.h>
 #include <iserver.h>
-#include <sh_vector.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -57,7 +56,6 @@ extern IGameEventManager2 *g_pGameEventManager;
 extern ISmmAPI *g_SMAPI;
 extern ISmmPlugin *g_PLAPI;
 extern PluginId g_PLID;
-extern SourceHook::ISourceHook *g_SHPtr;
 
 // CGlobalVars accessor, only valid during an active game
 CGlobalVars *GetGameGlobals();
